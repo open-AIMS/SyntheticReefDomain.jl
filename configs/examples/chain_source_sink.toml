@@ -1,0 +1,37 @@
+# Eight reefs along a current: larvae only travel downstream (reef_01 -> reef_08), so the
+# upstream reefs are sources and the downstream reefs are sinks. Heat exposure rises along
+# the chain, making the source reefs refuges. Three climate levels (labels 1-3).
+# Unlisted options take their defaults (see configs/default.toml).
+
+[domain]
+name = "ChainSourceSink"
+n_dhw_scenarios = 20
+n_cyclone_scenarios = 20
+
+[reefs]
+n = 8
+layout = "line"
+bearing_deg = 160.0
+spacing_km = 4.0
+n_clusters = 2
+
+[connectivity]
+topology = "chain"
+asymmetry = 1.0
+reach = 2
+self_recruitment = 0.15
+strength = 0.1
+
+[dhw]
+reef_exposure = {from = 0.6, to = 1.4}
+local_sd = 1.0
+
+[dhw.climate.1]
+trend_per_decade = 0.4
+
+[dhw.climate.2]
+trend_per_decade = 1.2
+
+[dhw.climate.3]
+trend_per_decade = 2.0
+event_prob = 0.25

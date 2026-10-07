@@ -1,0 +1,5 @@
+Manifest*.toml
+domains/
+Outputs/
+.vscode/
+*.aux.xml

@@ -1,0 +1,38 @@
+# Twenty reefs in four clusters, well connected, with frequent strong cyclones (and two
+# prescribed cyclone years) on top of moderate warming. Initial cover is given as a
+# percentage of the whole reef area and varies in composition between reefs.
+# Unlisted options take their defaults (see configs/default.toml).
+
+[domain]
+name = "CycloneHeavy"
+n_dhw_scenarios = 20
+n_cyclone_scenarios = 20
+
+[reefs]
+n = 20
+layout = "clustered"
+n_clusters = 4
+spacing_km = 2.0
+cluster_spacing_km = 15.0
+habitat = "Outer Flat"
+
+[connectivity]
+topology = "distance_decay"
+decay_km = 8.0
+strength = 0.1
+
+[cover]
+total_percent = {min = 10.0, max = 25.0}
+basis = "reef"
+jitter = 0.1
+
+[dhw]
+trend_per_decade = 0.8
+
+[dhw.climate.45]
+
+[cyclones]
+annual_prob = 0.25
+intensity = [0.4, 1.0]
+event_years = [2032, 2058]
+group_vulnerability = [0.8, 0.7, 0.5, 0.25, 0.1]

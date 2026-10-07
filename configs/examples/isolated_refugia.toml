@@ -1,0 +1,30 @@
+# Twelve isolated reefs on a grid (self-recruitment only), with a few explicit cool refugia
+# and hotspots, the same cover composition everywhere, and no cyclones -- to isolate the
+# effect of heat stress. Unlisted options take their defaults (see configs/default.toml).
+
+[domain]
+name = "IsolatedRefugia"
+n_dhw_scenarios = 20
+n_cyclone_scenarios = 1
+
+[reefs]
+n = 12
+layout = "grid"
+spacing_km = 8.0
+n_clusters = 3
+
+[connectivity]
+topology = "isolated"
+self_recruitment = 0.3
+
+[cover]
+total_percent = 30.0
+
+[dhw]
+reef_exposure = [0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 1.5]
+local_sd = 0.5
+
+[dhw.climate.45]
+
+[cyclones]
+enabled = false
