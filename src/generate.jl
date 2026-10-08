@@ -43,7 +43,7 @@ function Base.show(io::IO, ::MIME"text/plain", dom::SyntheticDomain)
                 "$(cfg.reefs.n_clusters) cluster(s))")
     println(io, "  timeframe    : $(cfg.timeframe[1])-$(cfg.timeframe[2]) ($T years)")
     println(io, "  connectivity : $(cfg.connectivity.topology), " *
-                "$(count(>(0), dom.connectivity) - cfg.reefs.n) off-diagonal links")
+                "$(offdiag_links(dom.connectivity)) off-diagonal links")
     println(io, "  initial cover: $(round(100minimum(sum(dom.cover; dims=1)); digits=1))-" *
                 "$(round(100maximum(sum(dom.cover; dims=1)); digits=1))% of habitable area")
     for label in climate_labels(dom)

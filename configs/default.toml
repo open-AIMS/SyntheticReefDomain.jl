@@ -39,13 +39,19 @@ waves_from_ub_med = true       # wave Ub file = ub_med per reef; false = zeros
 
 [connectivity]
 # Source (row) -> sink (column) transfer probabilities.
-topology = "distance_decay"    # isolated | chain | ring | all_to_all | distance_decay | random
+# topology: isolated | chain | ring | all_to_all | distance_decay | random | truncated_dilution
+topology = "distance_decay"
 self_recruitment = 0.2         # diagonal: fraction of larvae settling on the home reef
 strength = 0.05                # largest off-diagonal value
 asymmetry = 0.0                # chain/ring: 0 = symmetric, 1 = only reef i -> i+1
 reach = 1                      # chain/ring: downstream neighbours linked (weights halve per step)
 decay_km = 10.0                # distance_decay: exp(-distance / decay_km)
 density = 0.3                  # random: probability that a directed link exists
+# truncated_dilution: distance-based connectivity for C~scape (ignores self_recruitment and
+# strength; see the README)
+threshold_m = 157.57           # no settlement within this distance of a source reef's centre
+dispersal_km = 20.0            # distance at which the dispersal kernel has fallen to 5%
+matrix_total = 0.00262         # whole matrix scaled to this sum (1 = as the original R script)
 
 [cover]
 total_percent = {min = 10.0, max = 40.0}  # total initial cover per reef, in %

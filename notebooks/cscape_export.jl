@@ -16,19 +16,6 @@ macro bind(def, element)
     #! format: on
 end
 
-# ╔═╡ 32db1670-c2c9-11f1-26b9-7d8e198b2e41
-md"""
-# C~scape (R) export
-
-Turn a synthetic domain into an input project for the R package
-[cscape](https://github.com/open-AIMS/c-scape), which runs with `run_cscape()`. Pick a domain:
-its settings are rebuilt here, so the C~scape inputs match the ADRIA domain exactly. Then
-set the C~scape options, check the previews, and write the project or download it as a zip.
-
-Demography files (`demog_inputs_<type>.rds`) are **not** created: add them to the project's
-`data/` folder before running C~scape.
-"""
-
 # ╔═╡ 32de4ac0-c2c9-11f1-3937-bb5adc4f7077
 begin
 	import Pkg
@@ -43,6 +30,19 @@ begin
 	const REPO = normpath(joinpath(@__DIR__, ".."))
 	const CONFIG_DIR = joinpath(REPO, "configs")
 end
+
+# ╔═╡ 32db1670-c2c9-11f1-26b9-7d8e198b2e41
+md"""
+# C~scape (R) export
+
+Turn a synthetic domain into an input project for the R package
+[cscape](https://github.com/open-AIMS/c-scape), which runs with `run_cscape()`. Pick a domain:
+its settings are rebuilt here, so the C~scape inputs match the ADRIA domain exactly. Then
+set the C~scape options, check the previews, and write the project or download it as a zip.
+
+Demography files (`demog_inputs_<type>.rds`) are **not** created: add them to the project's
+`data/` folder before running C~scape.
+"""
 
 # ╔═╡ 32de4ac0-c2c9-11f1-2cc9-d9d7308631e9
 config_files = let

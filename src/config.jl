@@ -28,7 +28,9 @@ const MIN_YEARS = 26
 const DPKG_VERSION = "0.8.0"  # ADRIA.COMPAT_DPKG
 
 const LAYOUTS = ("line", "grid", "ring", "random", "clustered")
-const TOPOLOGIES = ("isolated", "chain", "ring", "all_to_all", "distance_decay", "random")
+const TOPOLOGIES = (
+    "isolated", "chain", "ring", "all_to_all", "distance_decay", "random", "truncated_dilution"
+)
 const COVER_BASES = ("habitable", "reef")
 const CLIMATE_KEYS = (
     "baseline", "trend_per_decade", "interannual_sd", "ar1", "event_prob",
@@ -82,9 +84,19 @@ transfer probability matrix.
 - `reach` : chain/ring only; number of downstream neighbours linked (weights halve per step)
 - `decay_km` : distance_decay only; e-folding distance of exp(-d / decay_km)
 - `density` : random only; probability that a directed link exists
+- `threshold_m` : truncated_dilution only; no settlement within this distance (m) of a
+  source reef's centre
+- `dispersal_km` : truncated_dilution only; distance at which the dispersal kernel has
+  fallen to 5%
+- `matrix_total` : truncated_dilution only; sum of the whole matrix after scaling
 
 Each row is rescaled where `self_recruitment + exports > 1` so that no reef exports more
 larvae than it produces. Values below 1e-6 are zeroed (ADRIA applies the same cutoff).
+
+`truncated_dilution` is the distance-based connectivity used for C~scape: a truncated
+negative exponential kernel integrated over each destination reef, weighted by the
+destination's substrate area and scaled to `matrix_total`. `self_recruitment` and `strength`
+are not used. See `build_connectivity`.
 """
 Base.@kwdef struct ConnectivityConfig
     topology::String = "distance_decay"
@@ -94,6 +106,9 @@ Base.@kwdef struct ConnectivityConfig
     reach::Int = 1
     decay_km::Float64 = 10.0
     density::Float64 = 0.3
+    threshold_m::Float64 = 157.57
+    dispersal_km::Float64 = 20.0
+    matrix_total::Float64 = 0.00262
 end
 
 """
@@ -589,6 +604,10 @@ function validate(cfg::DomainConfig)::DomainConfig
     _check_range!(errs, "connectivity.density", c.density, 0.0, 1.0)
     c.reach >= 1 || push!(errs, "connectivity.reach must be >= 1.")
     c.decay_km > 0 || push!(errs, "connectivity.decay_km must be > 0.")
+    c.threshold_m >= 0 || push!(errs, "connectivity.threshold_m must be >= 0.")
+    c.dispersal_km > 0 || push!(errs, "connectivity.dispersal_km must be > 0.")
+    0 < c.matrix_total <= 1 ||
+        push!(errs, "connectivity.matrix_total must be > 0 and <= 1, got $(c.matrix_total).")
 
     # [cover]
     cv = cfg.cover

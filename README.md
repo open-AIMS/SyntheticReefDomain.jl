@@ -149,7 +149,7 @@ to add the plots. The same plots are available directly as `plot_map(dom)`,
 | --- | --- |
 | `[domain]` | name, timeframe (at least 26 years), seed, number of stochastic DHW and cyclone scenarios (scenario 1 is always disturbance-free; see below) |
 | `[reefs]` | number of reefs (1-20); layout (`line`, `grid`, `ring`, `random`, `clustered`); spacing; bearing; clusters; area, habitable fraction `k`, depth, `ub_med`, habitat, CoralBlox calibration group |
-| `[connectivity]` | topology (`isolated`, `chain`, `ring`, `all_to_all`, `distance_decay`, `random`); self-recruitment; strength; asymmetry and reach (chain/ring); decay distance; link density |
+| `[connectivity]` | topology (`isolated`, `chain`, `ring`, `all_to_all`, `distance_decay`, `random`, `truncated_dilution`); self-recruitment; strength; asymmetry and reach (chain/ring); decay distance; link density; no-settlement radius, dispersal distance and matrix total (`truncated_dilution`, see below) |
 | `[cover]` | total cover per reef, as % of habitable or of whole-reef area; functional-group composition; per-reef variation of the mix |
 | `[dhw]` | baseline; warming trend; year-to-year variability (SD, autocorrelation); marine heatwaves (probability, size, forced years); per-reef exposure and offset; local noise; one or more climate levels |
 | `[cyclones]` | on/off, annual probability, forced years, intensity range, mortality per functional group |
@@ -167,6 +167,44 @@ of four forms:
 Reef order follows the layout: west to east along a line with bearing 90, serpentine rows
 for a grid, around the ring, cluster by cluster. Gradients and chain connectivity follow
 that order.
+
+### Connectivity: truncated dilution (distance-based, for C~scape)
+
+`topology = "truncated_dilution"` builds connectivity the way C~scape connectivity files are
+made from site polygons. No larvae settle within `threshold_m` (157.57 m) of a source reef's
+centre. Beyond that, settlement follows an exponential kernel `exp(-α x)` that falls to 5%
+at `dispersal_km` (20 km). For each reef:
+- substrate area `A = area × k / 100`;
+- radius `r = sqrt(A / π)`;
+- centre distance `d` (m).
+
+The matrix (rows = sources, columns = sinks) is then built as:
+- **local retention** (diagonal): the kernel integrated from 0 to the reef's radius, times its
+  substrate area. It is zero when `r ≤ 157.57 m`, i.e. below about 78,000 m² of substrate.
+- **source i → sink j**: the kernel integrated from the near edge of reef j (`d - r_j`) to its
+  centre (`d`), times reef j's substrate area. Links are weighted by the **destination**:
+  source output is already counted when ADRIA and C~scape compute larval production from
+  cover and area.
+- **scaling**: the whole matrix is scaled to sum to `matrix_total` (0.00262, the mean
+  reef-level self-retention estimated from 35 GBR reefs and 1,600 sites). Values below 1e-6
+  are then zeroed, as ADRIA does.
+
+`self_recruitment` and `strength` are not used. Things to know:
+- **Defaults retain nothing locally.** With the default reef sizes (radius 93-137 m) no reef
+  retains its own larvae, in line with most real sites. Larger reefs, or the example
+  `configs/examples/truncated_dilution.toml` (12 sites 1 km apart), show local retention.
+- **Long links are dropped.** With a total of 0.00262, weak long links fall below the 1e-6
+  cutoff, beyond roughly 30 km for 20 reefs 5 km apart. The domain report shows the total
+  after the cutoff.
+- **ADRIA vs C~scape.** ADRIA only uses each sink's relative mix of sources, so for ADRIA
+  only the pattern matters. C~scape uses the absolute values: keep the export's
+  connectivity scale at 1.
+- **Differences from the original R script** (`wrangle_connectivity_per_group`):
+  - set `matrix_total = 1` to reproduce its scaling;
+  - distances are great-circle distances between reef centres, not Euclidean distances
+    between polygon centroids in EPSG:3577 (a negligible difference at these scales);
+  - the 157.57 m truncation also applies to links between reefs, which only matters when a
+    destination's edge is within 157.57 m of the source centre.
 
 ### Heat stress
 
@@ -309,7 +347,8 @@ Differences from the ADRIA run to keep in mind:
   domain's per-group cyclone vulnerabilities are not used.
 - **Connectivity:** C~scape uses connectivity as absolute transfer probabilities, while
   ADRIA's own model only uses proportions. Use the scale option if the domain's values are
-  too high for C~scape.
+  too high for C~scape. The `truncated_dilution` topology already gives C~scape-style
+  absolute values (summing to 0.00262), so keep the scale at 1 for it.
 
 ## Running in ADRIA
 
@@ -404,6 +443,7 @@ cite those, before using results in a publication.
 | `[dhw]` parameters | baseline 3.5, trend 1.2 DHW/decade, SD 2, AR(1) 0.3, heatwave probability 0.15, size 2-6 DHW, exposure 0.7-1.3, local SD 2 | Tuned so the default domain resembles Test_domain DHW (about 5 DHW in the first decade, 13 in the last) | Not calibrated to observations or climate projections |
 | `[cyclones]` parameters | annual probability 0.1, intensity 0.2-1.0, vulnerability 0.6 / 0.5 / 0.4 / 0.2 / 0.1 | Placeholders. The ordering (Acropora most, massives least susceptible) follows general understanding; the numbers come from no source | Not calibrated |
 | `[connectivity]` parameters | distance decay over 10 km, self-recruitment 0.2, strength 0.05 | Illustrative placeholders | Not calibrated |
+| `truncated_dilution` parameters | no settlement within 157.57 m, kernel down to 5% at 20 km, matrix total 0.00262 | The method note *Distance-based Connectivity for C~scape Framework* and the R script `03c_create_connectivity_files_v2.R` (unpublished, AIMS; provided by the repository owner). 0.00262 is the note's mean reef-level self-retention from 35 GBR reefs and 1,600 sites | Not peer reviewed; no licence stated |
 | `reefs.center` | 146.0° E, 18.0° S | Arbitrary location in the central Great Barrier Reef region | -- |
 
 ### Methods
@@ -421,7 +461,11 @@ The model structures are the author's own simple choices, not taken from the lit
 
 - reef DHW = exposure x regional signal + offset + noise;
 - cyclone mortality = intensity x group vulnerability;
-- the connectivity topologies.
+- the connectivity topologies, except `truncated_dilution`.
+
+`truncated_dilution` reimplements, in Julia, the method of the unpublished R script and note
+named under *Default values*. No code was copied from the script. The differences are listed
+under *Connectivity: truncated dilution*.
 
 ### Dependencies
 

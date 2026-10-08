@@ -95,11 +95,24 @@ function _settings(io::IO, name::AbstractString, dom::SyntheticDomain)
     _table(io, ["Setting", "Value"], rows)
 
     println(io, "### Connectivity\n")
-    rows = Any[
-        ["Topology", c.topology],
-        ["Self-recruitment", _num(c.self_recruitment)],
-        ["Strength (largest off-diagonal value)", _num(c.strength)]
-    ]
+    C = dom.connectivity
+    rows = if c.topology == "truncated_dilution"
+        Any[
+            ["Topology", "truncated_dilution: distance-based connectivity for C~scape " *
+                         "(truncated exponential kernel, weighted by destination substrate area)"],
+            ["No settlement within", "$(c.threshold_m) m of a source reef's centre"],
+            ["Dispersal distance (kernel down to 5%)", "$(_num(c.dispersal_km)) km"],
+            ["Matrix total", "$(_num(c.matrix_total)) set; $(_num(sum(C))) after the 1e-6 cutoff"],
+            ["Reefs with local retention",
+                "$(count(i -> C[i, i] > 0, 1:n)) of $n (needs a substrate radius above $(c.threshold_m) m)"]
+        ]
+    else
+        Any[
+            ["Topology", c.topology],
+            ["Self-recruitment", _num(c.self_recruitment)],
+            ["Strength (largest off-diagonal value)", _num(c.strength)]
+        ]
+    end
     if c.topology in ("chain", "ring")
         push!(rows, ["Asymmetry (0 symmetric, 1 downstream only)", _num(c.asymmetry)])
         push!(rows, ["Reach (downstream neighbours linked)", c.reach])
@@ -108,7 +121,7 @@ function _settings(io::IO, name::AbstractString, dom::SyntheticDomain)
     elseif c.topology == "random"
         push!(rows, ["Link density", _num(c.density)])
     end
-    push!(rows, ["Off-diagonal links", count(>(0), dom.connectivity) - n])
+    push!(rows, ["Off-diagonal links", offdiag_links(C)])
     _table(io, ["Setting", "Value"], rows)
 
     println(io, "### Initial cover\n")

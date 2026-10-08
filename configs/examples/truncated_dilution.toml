@@ -1,0 +1,22 @@
+# Twelve sites about 1 km apart with the distance-based connectivity used for C~scape
+# ("truncated dilution": no settlement within 157.57 m of a source site's centre, then an
+# exponential kernel). Only sites with more than about 78,000 m² of substrate (radius above
+# 157.57 m) retain some of their own larvae; the matrix sums to 0.00262.
+# Unlisted options take their defaults (see configs/default.toml).
+
+[domain]
+name = "TruncatedDilution"
+n_dhw_scenarios = 20
+n_cyclone_scenarios = 20
+
+[reefs]
+n = 12
+layout = "grid"
+spacing_km = 1.0
+area_m2 = {min = 50000.0, max = 250000.0}
+
+[connectivity]
+topology = "truncated_dilution"
+threshold_m = 157.57
+dispersal_km = 20.0
+matrix_total = 0.00262

@@ -49,9 +49,14 @@ function write_connectivity(
     open(path, "w") do io
         println(io, "# Synthetic transfer probability matrix ($GENERATOR).")
         println(io, "# Row names are the SOURCE reefs. Column names indicate the RECEIVING reef.")
-        println(io, "# topology=$(c.topology) self_recruitment=$(c.self_recruitment) " *
-                    "strength=$(c.strength) asymmetry=$(c.asymmetry) reach=$(c.reach) " *
-                    "decay_km=$(c.decay_km) density=$(c.density)")
+        if c.topology == "truncated_dilution"
+            println(io, "# topology=$(c.topology) threshold_m=$(c.threshold_m) " *
+                        "dispersal_km=$(c.dispersal_km) matrix_total=$(c.matrix_total)")
+        else
+            println(io, "# topology=$(c.topology) self_recruitment=$(c.self_recruitment) " *
+                        "strength=$(c.strength) asymmetry=$(c.asymmetry) reach=$(c.reach) " *
+                        "decay_km=$(c.decay_km) density=$(c.density)")
+        end
         println(io, join(["source_site"; ids], ","))
         for (i, id) in enumerate(ids)
             println(io, join([id; string.(C[i, :])], ","))

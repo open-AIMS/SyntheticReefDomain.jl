@@ -30,6 +30,12 @@ row_sums(C) = vec(sum(C; dims=2))
         save_config(path, cfg)
         @test config_to_dict(load_config(path)) == config_to_dict(cfg)
         @test config_to_dict(load_config(IOBuffer(read(path)))) == config_to_dict(cfg)
+        cfg_td = DomainConfig(; connectivity=ConnectivityConfig(;
+            topology="truncated_dilution", threshold_m=100.0, dispersal_km=12.5, matrix_total=1.0))
+        path_td = joinpath(TMP, "roundtrip_td.toml")
+        save_config(path_td, cfg_td)
+        @test config_to_dict(load_config(path_td)) == config_to_dict(cfg_td)
+        @test load_config(path_td).connectivity.dispersal_km == 12.5
 
         # The shipped configs load and validate
         cfg_dir = joinpath(@__DIR__, "..", "configs")
@@ -58,6 +64,10 @@ row_sums(C) = vec(sum(C; dims=2))
         @test_throws ArgumentError validate(
             DomainConfig(; connectivity=ConnectivityConfig(; topology="star"))
         )
+        for kw in ((dispersal_km=0.0,), (threshold_m=-1.0,), (matrix_total=0.0,), (matrix_total=1.5,))
+            @test_throws ArgumentError validate(DomainConfig(;
+                connectivity=ConnectivityConfig(; topology="truncated_dilution", kw...)))
+        end
         @test_throws ArgumentError load_config(Dict("reefs" => Dict("nn" => 3)))
         @test_throws ArgumentError load_config(
             Dict("dhw" => Dict("climate" => Dict("045" => Dict())))
@@ -109,7 +119,8 @@ row_sums(C) = vec(sum(C; dims=2))
             @test size(C) == (n, n)
             @test all(0 .<= C .<= 1)
             @test all(row_sums(C) .<= 1 + 1e-12)
-            @test all(C[i, i] == 0.25 for i in 1:n)
+            # truncated_dilution does not use self_recruitment (tested below)
+            topology == "truncated_dilution" || @test all(C[i, i] == 0.25 for i in 1:n)
         end
 
         @test all(offdiag(conn(; topology="isolated")) .== 0)
@@ -142,6 +153,60 @@ row_sums(C) = vec(sum(C; dims=2))
         # One reef: self recruitment only
         cfg1 = small_cfg(; n=1)
         @test build_connectivity(cfg1, build_reefs(cfg1)) == fill(0.2, 1, 1)
+    end
+
+    @testset "Truncated dilution connectivity" begin
+        td(n, reefs=ReefConfig(; n=n); kw...) = begin
+            cfg = small_cfg(; n=n, reefs=reefs,
+                connectivity=ConnectivityConfig(; topology="truncated_dilution", kw...))
+            build_connectivity(cfg, build_reefs(cfg))
+        end
+
+        # Default reefs (radius 93-137 m) retain nothing; every pair is linked; scaled total
+        n = 6
+        C = td(n)
+        @test all(C .>= 0)
+        @test all(C[i, i] == 0 for i in 1:n)
+        @test SyntheticReefDomain.offdiag_links(C) == n * (n - 1)
+        @test sum(C) ≈ 0.00262
+        C1 = td(n; matrix_total=1.0)
+        @test sum(C1) ≈ 1.0
+        @test C ≈ 0.00262 .* C1
+        @test td(n; dispersal_km=5.0)[1, 3] < C[1, 3]  # shorter dispersal: weaker far links
+
+        # Matches a direct numerical integral of the truncated kernel. Reefs 300 m apart
+        # with radii of 169-219 m: local retention on every reef, and the 157.57 m
+        # truncation cuts into the links between neighbours.
+        reefs3 = ReefConfig(; n=3, spacing_km=0.3, area_m2=[150_000.0, 200_000.0, 250_000.0],
+            k_percent=60.0)
+        cfg3 = small_cfg(; n=3, reefs=reefs3,
+            connectivity=ConnectivityConfig(; topology="truncated_dilution", matrix_total=1.0))
+        r3 = build_reefs(cfg3)
+        C3 = build_connectivity(cfg3, r3)
+        α, x0 = -log(0.05) / 20_000, 157.57
+        kernel(x) = x < x0 ? 0.0 : exp(-α * x)
+        trapz(f, a, b; m=200_000) = (h = (b - a) / m; h * (sum(f(a + k * h) for k in 1:(m - 1)) + (f(a) + f(b)) / 2))
+        A = r3.area .* r3.k ./ 100
+        rad = sqrt.(A ./ π)
+        d = 1000 .* SyntheticReefDomain.distance_matrix_km(r3)
+        @test all(d[i, i + 1] - rad[i + 1] < x0 for i in 1:2)
+        raw = [i == j ? trapz(kernel, 0.0, rad[i]) * A[i] : trapz(kernel, d[i, j] - rad[j], d[i, j]) * A[j]
+               for i in 1:3, j in 1:3]
+        @test C3 ≈ raw ./ sum(raw) rtol = 1e-4
+        @test all(C3[i, i] > 0 for i in 1:3)
+
+        # Links are weighted by the destination: the larger reef receives more
+        C2 = td(2, ReefConfig(; n=2, area_m2=[50_000.0, 200_000.0]))
+        @test C2[1, 2] > C2[2, 1] > 0
+
+        # One reef: all zeros when it is too small to retain larvae, else the whole total
+        @test td(1) == zeros(1, 1)
+        @test td(1, ReefConfig(; n=1, area_m2=200_000.0, k_percent=60.0)) ≈ fill(0.00262, 1, 1)
+
+        # Long, weak links fall under ADRIA's 1e-6 cutoff
+        C20 = td(20)
+        @test 0.0025 < sum(C20) < 0.00262
+        @test C20[1, 20] == 0
     end
 
     @testset "Initial cover" begin
@@ -309,6 +374,19 @@ row_sums(C) = vec(sum(C; dims=2))
         @test occursin("Plots were not generated", readme2)
         @test occursin("### Reefs (resolved values)", readme2)
         @test !occursin("](figures/", readme2)
+
+        # truncated_dilution lists its own settings instead of self-recruitment and strength
+        td_cfg = small_cfg(; n=4, name="ReportTD",
+            connectivity=ConnectivityConfig(; topology="truncated_dilution"))
+        td_path = write_domain(build_domain(td_cfg), joinpath(TMP, "ReportTD"); figures=false)
+        readme3 = read(joinpath(td_path, "README.md"), String)
+        @test occursin("| No settlement within | 157.57 m", readme3)
+        @test occursin("| Dispersal distance (kernel down to 5%) | 20 km |", readme3)
+        @test occursin("| Reefs with local retention | 0 of 4", readme3)
+        @test occursin("| Off-diagonal links | 12 |", readme3)
+        @test !occursin("| Self-recruitment |", readme3)
+        @test occursin("topology=truncated_dilution threshold_m=157.57",
+            read(joinpath(td_path, "connectivity", SyntheticReefDomain.connectivity_filename(td_cfg)), String))
     end
 
     @testset "C~scape export" begin
@@ -351,6 +429,11 @@ row_sums(C) = vec(sum(C; dims=2))
         @test names(ic) == ["reef_siteid"; CSCAPE_TYPES]
         @test vec(sum(Matrix(ic[:, 2:end]); dims=2)) ≈ vec(sum(synth.cover; dims=1)) .* synth.reefs.k
         @test ic.corym_non_acro == ic.brooder
+
+        # Distance-based connectivity keeps its absolute total in the spawner matrices
+        td3 = build_domain(small_cfg(; n=3, name="CsTD",
+            connectivity=ConnectivityConfig(; topology="truncated_dilution")))
+        @test sum(cscape_inputs(td3, CscapeOptions()).connectivity[:, :, 1]) ≈ 0.00262
 
         # Writing without R: CSV inputs, init cover, script; force keeps added files
         dir = joinpath(TMP, "Cs3_cscape")
@@ -470,9 +553,11 @@ row_sums(C) = vec(sum(C; dims=2))
 
     if RUN_SCENARIOS
         @testset "ADRIA scenario runs" begin
-            for n in (2, 10, 20)
-                cfg = small_cfg(; n=n, name="Run_$n")
-                path = write_domain(build_domain(cfg), joinpath(TMP, "Run_$n"); figures=false)
+            for (n, topology) in ((2, "distance_decay"), (10, "distance_decay"),
+                (20, "distance_decay"), (10, "truncated_dilution"))
+                name = "Run_$(n)_$(topology)"
+                cfg = small_cfg(; n=n, name=name, connectivity=ConnectivityConfig(; topology=topology))
+                path = write_domain(build_domain(cfg), joinpath(TMP, name); figures=false)
                 dom = ADRIA.load_domain(path, "45")
                 scens = ADRIA.sample_cf(dom, 4)
                 rs = ADRIA.run_scenarios(dom, scens, "45"; show_progress=false)

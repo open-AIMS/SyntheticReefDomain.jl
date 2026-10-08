@@ -200,6 +200,7 @@ end
 	- *chain / ring:* **asymmetry** (0 symmetric, 1 downstream only) $(Child(:asymmetry, Slider(0:0.05:1; default=snap(c.asymmetry, 0:0.05:1), show_value=true))) **reach** $(Child(:reach, Slider(1:5; default=clamp(c.reach, 1, 5), show_value=true)))
 	- *distance_decay:* **decay distance** $(Child(:decay, Slider(0.5:0.5:50; default=snap(c.decay_km, 0.5:0.5:50), show_value=true))) km
 	- *random:* **link density** $(Child(:density, Slider(0:0.05:1; default=snap(c.density, 0:0.05:1), show_value=true)))
+	- *truncated_dilution* (distance-based connectivity for C~scape; self-recruitment and strength are not used): **no settlement within** $(Child(:threshold, NumberField(0:0.01:2000; default=snap(c.threshold_m, 0:0.01:2000)))) m of a source reef's centre, **dispersal distance** (kernel down to 5%) $(Child(:dispersal, Slider(1:100; default=snap(c.dispersal_km, 1:100), show_value=true))) km, **matrix total** $(Child(:matrix_total, NumberField(0.00001:0.00001:1; default=snap(c.matrix_total, 0.00001:0.00001:1))))
 
 	ADRIA's own model only uses each sink's *relative* mix of sources; absolute values matter for decision criteria and the other engines.
 	"""
@@ -305,7 +306,10 @@ cfg = try
 			asymmetry=conn_ui.asymmetry,
 			reach=conn_ui.reach,
 			decay_km=conn_ui.decay,
-			density=conn_ui.density
+			density=conn_ui.density,
+			threshold_m=Float64(conn_ui.threshold),
+			dispersal_km=Float64(conn_ui.dispersal),
+			matrix_total=Float64(conn_ui.matrix_total)
 		),
 		cover=CoverConfig(;
 			total_percent=pick(b.cover.total_percent, range_spec(cover_ui.total_min, cover_ui.total_max)),
