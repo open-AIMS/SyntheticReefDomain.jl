@@ -283,7 +283,11 @@ julia --project=notebooks notebooks/run.jl
      A file opened this way wins over the dropdown. Choosing from the dropdown again clears
      it. If the file is not a valid config, a warning says why and the dropdown choice is
      used instead.
-2. Adjust the controls. The domain is rebuilt in memory on every change and previewed:
+2. Adjust the controls. Where a section has a choice (reef layout, connectivity topology,
+   reef-exposure mode, cyclones on/off), only the settings for the selected option are
+   shown; switching option resets just those settings to the starting values. The
+   *keep per-reef lists* checkbox only appears when the starting file has per-reef lists.
+   The domain is rebuilt in memory on every change and previewed:
    - a reef map with connectivity arrows;
    - a connectivity matrix;
    - cover by functional group;

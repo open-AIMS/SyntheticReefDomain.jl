@@ -108,11 +108,25 @@ else
 end
 
 # ╔═╡ 30391b60-c2c9-11f1-122c-b14f46a9fee0
-md"""
-$(@bind keep_lists CheckBox(default=true)) keep per-reef lists from the starting file (used
-when their length matches the number of reefs; the matching range controls below are then
-ignored).
-"""
+begin
+	# Settings given as one value per reef in the starting file
+	base_lists = [name for (name, spec) in (
+		"area" => base.reefs.area_m2, "k" => base.reefs.k_percent,
+		"depth" => base.reefs.depth_med, "ub_med" => base.reefs.ub_med,
+		"habitat" => base.reefs.habitat, "CoralBlox group" => base.reefs.cb_calib_group,
+		"total cover" => base.cover.total_percent, "reef exposure" => base.dhw.reef_exposure,
+		"reef offset" => base.dhw.reef_offset
+	) if spec isa AbstractVector]
+	# Always bound (default true); only shown when the starting file has per-reef lists
+	keep_lists_box = @bind keep_lists CheckBox(default=true)
+	if isempty(base_lists)
+		nothing
+	else
+		md"""
+		$(keep_lists_box) keep the per-reef lists in the starting file ($(join(base_lists, ", "))) while their length matches the number of reefs; the matching controls below are then ignored.
+		"""
+	end
+end
 
 # ╔═╡ 30391b60-c2c9-11f1-0974-cbe7b3d5cbee
 begin
@@ -133,6 +147,9 @@ begin
 
 	parse_years(s) = [parse(Int, t) for t in split(strip(s), r"[,;\s]+") if !isempty(t)]
 
+	"Value of a control that may be hidden for the selected option, else `default`. (A panel without controls gives `()`.)"
+	opt(ui, key, default) = ui isa NamedTuple && haskey(ui, key) ? getfield(ui, key) : default
+
 	"Parse `label = trend; label = trend`, keeping other overrides of existing levels."
 	function parse_climate(s, base_climate)
 		out = Dict{Int,Dict{String,Any}}()
@@ -148,6 +165,19 @@ begin
 		return out
 	end
 
+	const LAYOUT_LABELS = [
+		"line" => "line", "grid" => "grid (serpentine rows)", "ring" => "ring",
+		"random" => "random positions", "clustered" => "clusters of reefs"
+	]
+	const TOPOLOGY_LABELS = [
+		"isolated" => "isolated (self-recruitment only)",
+		"chain" => "chain (neighbours in reef order)",
+		"ring" => "ring (chain closed into a loop)",
+		"all_to_all" => "all to all (equal links)",
+		"distance_decay" => "distance decay",
+		"random" => "random links",
+		"truncated_dilution" => "truncated dilution (distance-based, as for C~scape)"
+	]
 	const HABITATS = ["Crest", "Outer Flat", "Sheltered Slope", "Slope"]
 	const GROUP_LABELS = [
 		"Tabular Acropora", "Corymbose Acropora", "Corymbose non-Acropora",
@@ -168,16 +198,34 @@ end
 	"""
 end
 
+# ╔═╡ 9a8057f0-c36d-11f1-03b2-150e3f705763
+md"""
+## Reefs
+**Layout** $(@bind reef_layout Select(LAYOUT_LABELS; default=base.reefs.layout))
+"""
+
+# ╔═╡ 9a838c40-c36d-11f1-34d5-afafe5d2f07e
+# Settings that only apply to the selected layout
+@bind layout_ui PlutoUI.combine() do Child
+	r = base.reefs
+	if reef_layout == "clustered"
+		md"""
+		- **Spacing between cluster centres** $(Child(:cluster_spacing, Slider(1:100; default=snap(r.cluster_spacing_km, 1:100), show_value=true))) km (reefs within a cluster use the spacing below)
+		"""
+	else
+		md""
+	end
+end
+
 # ╔═╡ 30391b60-c2c9-11f1-10ca-61570837d1a9
 @bind reef_ui PlutoUI.combine() do Child
 	r = base.reefs
 	habitat = r.habitat isa AbstractString && r.habitat in HABITATS ? r.habitat : "Slope"
 	cb = r.cb_calib_group isa Integer ? r.cb_calib_group : 1
 	md"""
-	## Reefs
 	- **Number of reefs** $(Child(:n, Slider(1:20; default=r.n, show_value=true)))
-	- **Layout** $(Child(:layout, Select(collect(SRD.LAYOUTS); default=r.layout))) with $(Child(:n_clusters, Slider(1:20; default=r.n_clusters, show_value=true))) cluster(s)
-	- **Spacing** $(Child(:spacing, Slider(0.5:0.5:50; default=snap(r.spacing_km, 0.5:0.5:50), show_value=true))) km; between cluster centres $(Child(:cluster_spacing, Slider(1:100; default=snap(r.cluster_spacing_km, 1:100), show_value=true))) km
+	- **Clusters** $(Child(:n_clusters, Slider(1:20; default=r.n_clusters, show_value=true))) (groups of neighbouring reefs, written as `cluster_id`)
+	- **Spacing** between neighbouring reefs $(Child(:spacing, Slider(0.5:0.5:50; default=snap(r.spacing_km, 0.5:0.5:50), show_value=true))) km
 	- **Bearing** of the main axis $(Child(:bearing, Slider(0:5:355; default=snap(mod(r.bearing_deg, 360), 0:5:355), show_value=true)))° from north
 	- **Centre** lon $(Child(:lon, NumberField(-180:0.01:180; default=snap(r.center[1], -180:0.01:180)))) lat $(Child(:lat, NumberField(-80:0.01:80; default=snap(r.center[2], -80:0.01:80))))
 	- **Area** (m²) $(Child(:area_min, min_field(r.area_m2, 1000:1000:5_000_000))) to $(Child(:area_max, max_field(r.area_m2, 1000:1000:5_000_000)))
@@ -189,21 +237,62 @@ end
 	"""
 end
 
+# ╔═╡ 9a838c40-c36d-11f1-346d-19653d2c9243
+md"""
+## Connectivity
+Source (row) → sink (column) transfer probabilities. ADRIA's own model only uses each sink's *relative* mix of sources; absolute values matter for decision criteria and the other engines.
+
+**Topology** $(@bind conn_topology Select([t => get(Dict(TOPOLOGY_LABELS), t, t) for t in SRD.TOPOLOGIES]; default=base.connectivity.topology))
+"""
+
 # ╔═╡ 30391b60-c2c9-11f1-3ad1-d7ce51a8e5d9
+# Settings that only apply to the selected topology (the others keep the starting values)
 @bind conn_ui PlutoUI.combine() do Child
 	c = base.connectivity
-	md"""
-	## Connectivity
-	Source (row) → sink (column) transfer probabilities.
-	- **Topology** $(Child(:topology, Select(collect(SRD.TOPOLOGIES); default=c.topology)))
-	- **Self-recruitment** $(Child(:self, Slider(0:0.01:1; default=snap(c.self_recruitment, 0:0.01:1), show_value=true))) **Strength** (largest off-diagonal value) $(Child(:strength, Slider(0:0.005:1; default=snap(c.strength, 0:0.005:1), show_value=true)))
-	- *chain / ring:* **asymmetry** (0 symmetric, 1 downstream only) $(Child(:asymmetry, Slider(0:0.05:1; default=snap(c.asymmetry, 0:0.05:1), show_value=true))) **reach** $(Child(:reach, Slider(1:5; default=clamp(c.reach, 1, 5), show_value=true)))
-	- *distance_decay:* **decay distance** $(Child(:decay, Slider(0.5:0.5:50; default=snap(c.decay_km, 0.5:0.5:50), show_value=true))) km
-	- *random:* **link density** $(Child(:density, Slider(0:0.05:1; default=snap(c.density, 0:0.05:1), show_value=true)))
-	- *truncated_dilution* (distance-based connectivity for C~scape; self-recruitment and strength are not used): **no settlement within** $(Child(:threshold, NumberField(0:0.01:2000; default=snap(c.threshold_m, 0:0.01:2000)))) m of a source reef's centre, **dispersal distance** (kernel down to 5%) $(Child(:dispersal, Slider(1:100; default=snap(c.dispersal_km, 1:100), show_value=true))) km, **matrix total** $(Child(:matrix_total, NumberField(0.00001:0.00001:1; default=snap(c.matrix_total, 0.00001:0.00001:1))))
-
-	ADRIA's own model only uses each sink's *relative* mix of sources; absolute values matter for decision criteria and the other engines.
-	"""
+	self = Child(:self, Slider(0:0.01:1; default=snap(c.self_recruitment, 0:0.01:1), show_value=true))
+	strength = Child(:strength, Slider(0:0.005:1; default=snap(c.strength, 0:0.005:1), show_value=true))
+	t = conn_topology
+	if t == "isolated"
+		md"""
+		Each reef only recruits its own larvae.
+		- **Self-recruitment** $(self)
+		"""
+	elseif t in ("chain", "ring")
+		md"""
+		Each reef sends larvae to its downstream neighbours in reef order$(t == "ring" ? ", with the last reef linked back to the first" : ""). Weights halve with every further step.
+		- **Self-recruitment** $(self)
+		- **Strength** (largest link) $(strength)
+		- **Asymmetry** (0 = both directions equally, 1 = downstream only) $(Child(:asymmetry, Slider(0:0.05:1; default=snap(c.asymmetry, 0:0.05:1), show_value=true)))
+		- **Reach** (downstream neighbours linked) $(Child(:reach, Slider(1:5; default=clamp(c.reach, 1, 5), show_value=true)))
+		"""
+	elseif t == "all_to_all"
+		md"""
+		Every reef sends the same share of its larvae to every other reef.
+		- **Self-recruitment** $(self)
+		- **Strength** (every link) $(strength)
+		"""
+	elseif t == "distance_decay"
+		md"""
+		Links weaken with distance as exp(−distance / decay distance).
+		- **Self-recruitment** $(self)
+		- **Strength** (link at zero distance) $(strength)
+		- **Decay distance** $(Child(:decay, Slider(0.5:0.5:50; default=snap(c.decay_km, 0.5:0.5:50), show_value=true))) km
+		"""
+	elseif t == "random"
+		md"""
+		Each directed link exists with the given probability and gets a random weight up to the strength.
+		- **Self-recruitment** $(self)
+		- **Strength** (largest link) $(strength)
+		- **Link density** $(Child(:density, Slider(0:0.05:1; default=snap(c.density, 0:0.05:1), show_value=true)))
+		"""
+	else  # truncated_dilution
+		md"""
+		Distance-based connectivity as used for C~scape: a truncated exponential kernel, integrated over each destination reef and weighted by its substrate area.
+		- **No settlement within** $(Child(:threshold, NumberField(0:0.01:2000; default=snap(c.threshold_m, 0:0.01:2000)))) m of a source reef's centre
+		- **Dispersal distance** (kernel down to 5%) $(Child(:dispersal, Slider(1:100; default=snap(c.dispersal_km, 1:100), show_value=true))) km
+		- **Matrix total** (sum of the whole matrix) $(Child(:matrix_total, NumberField(0.00001:0.00001:1; default=snap(c.matrix_total, 0.00001:0.00001:1))))
+		"""
+	end
 end
 
 # ╔═╡ 30391b60-c2c9-11f1-0de7-79e7d624caac
@@ -229,9 +318,6 @@ end
 	d = base.dhw
 	labels = sort(collect(keys(d.climate)))
 	climate_text = join(["$l = $(SRD.climate_params(d, l).trend_per_decade)" for l in labels], "; ")
-	exposure = SRD.attr_spec(d.reef_exposure)
-	mode = exposure isa NamedTuple && haskey(exposure, :from) ? "gradient" : "range"
-	elo, ehi = mode == "gradient" ? (exposure.from, exposure.to) : SRD.attr_bounds(exposure)
 	md"""
 	## Heat stress (DHW)
 	- **Climate levels** as `label = warming trend (DHW per decade)`, separated by `;` $(Child(:climate, TextField(40; default=climate_text)))
@@ -239,21 +325,53 @@ end
 	- **Baseline** $(Child(:baseline, Slider(0:0.1:15; default=snap(d.baseline, 0:0.1:15), show_value=true))) DHW in the first year
 	- **Year-to-year variability** SD $(Child(:sd, Slider(0:0.1:6; default=snap(d.interannual_sd, 0:0.1:6), show_value=true))) autocorrelation $(Child(:ar1, Slider(0:0.05:0.95; default=snap(d.ar1, 0:0.05:0.95), show_value=true)))
 	- **Marine heatwaves** probability per year $(Child(:event_prob, Slider(0:0.01:1; default=snap(d.event_prob, 0:0.01:1), show_value=true))) adding $(Child(:mag_min, min_field(d.event_magnitude, 0:0.5:30))) to $(Child(:mag_max, max_field(d.event_magnitude, 0:0.5:30))) DHW; forced in years $(Child(:event_years, TextField(default=join(d.event_years, ", "))))
-	- **Reef exposure** multiplier $(Child(:exp_mode, Select(["range" => "random per reef", "gradient" => "gradient, first → last reef"]; default=mode))) from $(Child(:exp_lo, NumberField(0:0.05:3; default=snap(elo, 0:0.05:3)))) to $(Child(:exp_hi, NumberField(0:0.05:3; default=snap(ehi, 0:0.05:3))))
 	- **Reef offset** $(Child(:offset, Slider(-5:0.5:5; default=snap(first(SRD.attr_bounds(d.reef_offset)), -5:0.5:5), show_value=true))) DHW
 	- **Local noise** SD $(Child(:local_sd, Slider(0:0.1:6; default=snap(d.local_sd, 0:0.1:6), show_value=true))) (0, with exposure 1 and offset 0, gives identical DHW on every reef)
 	"""
 end
 
+# ╔═╡ 9a838c40-c36d-11f1-3034-9df067ed773c
+begin
+	exposure_spec = SRD.attr_spec(base.dhw.reef_exposure)
+	exposure_start_mode = exposure_spec isa Float64 ? "same" :
+		(exposure_spec isa NamedTuple && haskey(exposure_spec, :from) ? "gradient" : "range")
+	md"""
+	**Reef exposure** (multiplies the regional DHW signal on each reef) $(@bind exposure_mode Select(["same" => "same on every reef", "range" => "random per reef", "gradient" => "gradient, first → last reef"]; default=exposure_start_mode))
+	"""
+end
+
+# ╔═╡ 9a838c40-c36d-11f1-3fd5-f71cd67cf0f8
+# Exposure values for the selected mode
+@bind exposure_ui PlutoUI.combine() do Child
+	s = exposure_spec
+	lo, hi = s isa NamedTuple && haskey(s, :from) ? (s.from, s.to) : SRD.attr_bounds(s)
+	r = 0:0.05:3
+	lo_field = Child(:lo, NumberField(r; default=snap(lo, r)))
+	if exposure_mode == "same"
+		md"- Exposure $(lo_field) on every reef (1 = the regional signal)"
+	elseif exposure_mode == "gradient"
+		md"- From $(lo_field) on the first reef to $(Child(:hi, NumberField(r; default=snap(hi, r)))) on the last (e.g. 0.6 to 1.4: a refuge at one end, a hotspot at the other)"
+	else
+		md"- Random per reef between $(lo_field) and $(Child(:hi, NumberField(r; default=snap(hi, r))))"
+	end
+end
+
+# ╔═╡ 9a838c40-c36d-11f1-3432-6b2d400299a5
+md"""
+## Cyclones (system-wide)
+In a cyclone year every reef loses the same fraction of each functional group.
+
+$(@bind cyc_enabled CheckBox(default=base.cyclones.enabled)) cyclones enabled
+"""
+
 # ╔═╡ 30391b60-c2c9-11f1-1066-d3b3fbfd9aa7
+# Cyclone settings, shown only while cyclones are enabled
 @bind cyc_ui PlutoUI.combine() do Child
 	cy = base.cyclones
 	v = cy.group_vulnerability
 	slider(i) = Child(Symbol("v$i"), Slider(0:0.05:1; default=snap(v[i], 0:0.05:1), show_value=true))
+	cyc_enabled || return md"*Cyclones are off: the cyclone file is written with zero mortality in every scenario.*"
 	md"""
-	## Cyclones (system-wide)
-	In a cyclone year every reef loses the same fraction of each functional group.
-	- $(Child(:enabled, CheckBox(default=cy.enabled))) cyclones enabled
 	- **Probability per year** $(Child(:prob, Slider(0:0.01:1; default=snap(cy.annual_prob, 0:0.01:1), show_value=true))); forced in years $(Child(:event_years, TextField(default=join(cy.event_years, ", "))))
 	- **Event intensity** (0-1) $(Child(:int_min, min_field(cy.intensity, 0:0.05:1))) to $(Child(:int_max, max_field(cy.intensity, 0:0.05:1)))
 	- **Mortality at intensity 1**
@@ -270,11 +388,15 @@ cfg = try
 	let n = reef_ui.n, b = base
 	# Per-reef lists from the starting file win over the range controls (if they fit)
 	pick(spec, widget) = keep_lists && spec isa AbstractVector && length(spec) == n ? spec : widget
-	exposure = if dhw_ui.exp_mode == "gradient"
-		(from=Float64(dhw_ui.exp_lo), to=Float64(dhw_ui.exp_hi))
+	exposure = if exposure_mode == "gradient"
+		(from=Float64(exposure_ui.lo), to=Float64(exposure_ui.hi))
+	elseif exposure_mode == "same"
+		Float64(exposure_ui.lo)
 	else
-		range_spec(dhw_ui.exp_lo, dhw_ui.exp_hi)
+		range_spec(exposure_ui.lo, exposure_ui.hi)
 	end
+	# Settings hidden for the selected option keep their starting values
+	bc, by = b.connectivity, b.cyclones
 
 	DomainConfig(;
 		name=String(strip(dom_ui.name)),
@@ -284,12 +406,12 @@ cfg = try
 		n_cyclone_scenarios=dom_ui.n_cyc,
 		reefs=ReefConfig(;
 			n=n,
-			layout=reef_ui.layout,
+			layout=reef_layout,
 			center=[reef_ui.lon, reef_ui.lat],
 			spacing_km=reef_ui.spacing,
 			bearing_deg=reef_ui.bearing,
 			n_clusters=min(reef_ui.n_clusters, n),
-			cluster_spacing_km=reef_ui.cluster_spacing,
+			cluster_spacing_km=opt(layout_ui, :cluster_spacing, b.reefs.cluster_spacing_km),
 			area_m2=pick(b.reefs.area_m2, range_spec(reef_ui.area_min, reef_ui.area_max)),
 			k_percent=pick(b.reefs.k_percent, range_spec(reef_ui.k_min, reef_ui.k_max)),
 			depth_med=pick(b.reefs.depth_med, range_spec(reef_ui.depth_min, reef_ui.depth_max)),
@@ -300,16 +422,16 @@ cfg = try
 			waves_from_ub_med=reef_ui.waves_from_ub
 		),
 		connectivity=ConnectivityConfig(;
-			topology=conn_ui.topology,
-			self_recruitment=conn_ui.self,
-			strength=conn_ui.strength,
-			asymmetry=conn_ui.asymmetry,
-			reach=conn_ui.reach,
-			decay_km=conn_ui.decay,
-			density=conn_ui.density,
-			threshold_m=Float64(conn_ui.threshold),
-			dispersal_km=Float64(conn_ui.dispersal),
-			matrix_total=Float64(conn_ui.matrix_total)
+			topology=conn_topology,
+			self_recruitment=opt(conn_ui, :self, bc.self_recruitment),
+			strength=opt(conn_ui, :strength, bc.strength),
+			asymmetry=opt(conn_ui, :asymmetry, bc.asymmetry),
+			reach=opt(conn_ui, :reach, bc.reach),
+			decay_km=opt(conn_ui, :decay, bc.decay_km),
+			density=opt(conn_ui, :density, bc.density),
+			threshold_m=Float64(opt(conn_ui, :threshold, bc.threshold_m)),
+			dispersal_km=Float64(opt(conn_ui, :dispersal, bc.dispersal_km)),
+			matrix_total=Float64(opt(conn_ui, :matrix_total, bc.matrix_total))
 		),
 		cover=CoverConfig(;
 			total_percent=pick(b.cover.total_percent, range_spec(cover_ui.total_min, cover_ui.total_max)),
@@ -331,11 +453,11 @@ cfg = try
 			climate=parse_climate(dhw_ui.climate, b.dhw.climate)
 		),
 		cyclones=CycloneConfig(;
-			enabled=cyc_ui.enabled,
-			annual_prob=cyc_ui.prob,
-			event_years=parse_years(cyc_ui.event_years),
-			intensity=sort([cyc_ui.int_min, cyc_ui.int_max]),
-			group_vulnerability=[cyc_ui.v1, cyc_ui.v2, cyc_ui.v3, cyc_ui.v4, cyc_ui.v5]
+			enabled=cyc_enabled,
+			annual_prob=opt(cyc_ui, :prob, by.annual_prob),
+			event_years=cyc_enabled ? parse_years(cyc_ui.event_years) : by.event_years,
+			intensity=cyc_enabled ? sort([cyc_ui.int_min, cyc_ui.int_max]) : by.intensity,
+			group_vulnerability=[opt(cyc_ui, Symbol("v$i"), by.group_vulnerability[i]) for i in 1:5]
 		)
 	)
 	end
@@ -485,10 +607,16 @@ end
 # ╟─30391b60-c2c9-11f1-122c-b14f46a9fee0
 # ╟─30391b60-c2c9-11f1-0974-cbe7b3d5cbee
 # ╟─30391b60-c2c9-11f1-0e5e-8160066b836c
+# ╟─9a8057f0-c36d-11f1-03b2-150e3f705763
+# ╟─9a838c40-c36d-11f1-34d5-afafe5d2f07e
 # ╟─30391b60-c2c9-11f1-10ca-61570837d1a9
+# ╟─9a838c40-c36d-11f1-346d-19653d2c9243
 # ╟─30391b60-c2c9-11f1-3ad1-d7ce51a8e5d9
 # ╟─30391b60-c2c9-11f1-0de7-79e7d624caac
 # ╟─30391b60-c2c9-11f1-2f55-bda5e807038f
+# ╟─9a838c40-c36d-11f1-3034-9df067ed773c
+# ╟─9a838c40-c36d-11f1-3fd5-f71cd67cf0f8
+# ╟─9a838c40-c36d-11f1-3432-6b2d400299a5
 # ╟─30391b60-c2c9-11f1-1066-d3b3fbfd9aa7
 # ╟─30391b60-c2c9-11f1-058a-6f7e36312428
 # ╟─30391b60-c2c9-11f1-0e8f-7df8023603df
