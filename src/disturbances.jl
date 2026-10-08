@@ -1,11 +1,25 @@
 # Disturbance time series: heat stress (DHW), cyclone mortality and (static) wave exposure.
 # Arrays use ADRIA's (Julia) dimension order: timesteps x locations [x groups] x scenarios.
+#
+# Scenario 1 of every DHW and cyclone array is disturbance-free (all zeros): a control
+# scenario present in every domain. The configured stochastic scenarios follow as 2..S+1,
+# so the files hold `n_dhw_scenarios + 1` and `n_cyclone_scenarios + 1` scenarios.
+
+"""Index of the disturbance-free scenario in every DHW, wave and cyclone file."""
+const ZERO_SCENARIO = 1
+
+"""Add the all-zero scenario in front of the last (scenario) dimension."""
+function _prepend_zero_scenario(A::AbstractArray{Float64})
+    return cat(zeros(size(A)[1:(end - 1)]..., 1), A; dims=ndims(A))
+end
 
 """
     build_dhw(cfg::DomainConfig, reefs::DataFrame)
 
 DHW for every climate level. Returns `(dhw, regional)`: dictionaries keyed by climate label
-holding the `T x n x S` reef DHW and the `T x S` regional signal it was built from.
+holding the `T x n x (S + 1)` reef DHW and the `T x (S + 1)` regional signal it was built
+from, where `S = n_dhw_scenarios`. Scenario 1 is all zeros (no heat stress); the stochastic
+scenarios are 2..S+1.
 
 All climate levels use the same underlying random draws (common random numbers), and each
 reef's local noise comes from its own stream, so adding reefs or climate levels leaves
@@ -52,8 +66,8 @@ function build_dhw(cfg::DomainConfig, reefs::DataFrame)
             )
         end
 
-        dhw[label] = D
-        regional[label] = R
+        dhw[label] = _prepend_zero_scenario(D)
+        regional[label] = _prepend_zero_scenario(R)
     end
 
     return dhw, regional
@@ -62,9 +76,10 @@ end
 """
     build_cyclones(cfg::DomainConfig, n_reefs::Int)
 
-System-wide cyclone mortality. Returns `(mortality, intensity)`: the `T x n x 5 x S`
-mortality fraction ADRIA reads, identical on every reef, and the `T x S` event intensity
-(0 in years without a cyclone).
+System-wide cyclone mortality. Returns `(mortality, intensity)`: the `T x n x 5 x (S + 1)`
+mortality fraction ADRIA reads, identical on every reef, and the `T x (S + 1)` event
+intensity (0 in years without a cyclone), where `S = n_cyclone_scenarios`. Scenario 1 has no
+cyclones; `event_years` apply to the stochastic scenarios 2..S+1.
 """
 function build_cyclones(cfg::DomainConfig, n_reefs::Int)
     cy = cfg.cyclones
@@ -92,20 +107,21 @@ function build_cyclones(cfg::DomainConfig, n_reefs::Int)
         mortality[t, :, g, s] .= clamp(intensity[t, s] * cy.group_vulnerability[g], 0.0, 1.0)
     end
 
-    return mortality, intensity
+    return _prepend_zero_scenario(mortality), _prepend_zero_scenario(intensity)
 end
 
 """
     build_waves(cfg::DomainConfig, reefs::DataFrame)::Array{Float64,3}
 
-Wave Ub (`T x n x S`, with `S = n_dhw_scenarios`). There is no wave disturbance: each reef's
-`ub_med` is repeated over time and scenarios (or zeros with `waves_from_ub_med = false`).
+Wave Ub (`T x n x (S + 1)`, with `S = n_dhw_scenarios`). There is no wave disturbance: each
+reef's `ub_med` is repeated over time and scenarios (or zeros with `waves_from_ub_med = false`),
+including the disturbance-free scenario 1.
 
 A file is written anyway because ADRIA indexes waves with the DHW scenario index during
 site selection, so the wave file must have as many scenarios as the DHW file.
 """
 function build_waves(cfg::DomainConfig, reefs::DataFrame)::Array{Float64,3}
-    T, n, S = length(years(cfg)), nrow(reefs), cfg.n_dhw_scenarios
+    T, n, S = length(years(cfg)), nrow(reefs), cfg.n_dhw_scenarios + 1
     ub = cfg.reefs.waves_from_ub_med ? reefs.ub_med : zeros(n)
     return repeat(reshape(ub, 1, n, 1), T, 1, S)
 end

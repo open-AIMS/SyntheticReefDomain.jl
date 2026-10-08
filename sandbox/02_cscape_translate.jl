@@ -21,7 +21,8 @@ label = first(sort([
 ]; by=x -> parse(Int, x)))
 
 dom = ADRIA.load_domain(path, label)
-inputs = CscapeInterface.domain_to_cscape_inputs(dom; dhw_idx=1, cyclone_idx=1)  # wave_idx=0
+# Scenario 1 is the disturbance-free control, so use the first stochastic scenario (2)
+inputs = CscapeInterface.domain_to_cscape_inputs(dom; dhw_idx=2, cyclone_idx=2)  # wave_idx=0
 spatial = inputs.spatial_override
 show(stdout, MIME("text/plain"), spatial; allrows=true)
 println()

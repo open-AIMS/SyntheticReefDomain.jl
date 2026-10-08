@@ -9,11 +9,14 @@ Fields:
 - `reefs` : one row per reef (see [`build_reefs`](@ref))
 - `connectivity` : source x sink transfer probabilities (`n x n`)
 - `cover` : initial cover, `5 x n`, fraction of habitable area
-- `dhw` : climate label => DHW (`T x n x S_dhw`)
-- `dhw_regional` : climate label => regional DHW signal (`T x S_dhw`)
-- `waves` : wave Ub (`T x n x S_dhw`)
-- `cyclone_mortality` : `T x n x 5 x S_cyc`
-- `cyclone_intensity` : `T x S_cyc`, 0 in years without a cyclone
+- `dhw` : climate label => DHW (`T x n x (S_dhw + 1)`)
+- `dhw_regional` : climate label => regional DHW signal (`T x (S_dhw + 1)`)
+- `waves` : wave Ub (`T x n x (S_dhw + 1)`)
+- `cyclone_mortality` : `T x n x 5 x (S_cyc + 1)`
+- `cyclone_intensity` : `T x (S_cyc + 1)`, 0 in years without a cyclone
+
+`S_dhw` and `S_cyc` are the configured `n_dhw_scenarios` and `n_cyclone_scenarios`. Scenario 1
+(`ZERO_SCENARIO`) of every disturbance array is all zeros; the stochastic scenarios follow.
 """
 struct SyntheticDomain
     config::DomainConfig
@@ -33,7 +36,8 @@ climate_labels(dom::SyntheticDomain) = climate_labels(dom.config)
 function Base.show(io::IO, ::MIME"text/plain", dom::SyntheticDomain)
     cfg = dom.config
     T = length(years(dom))
-    n_events = count(>(0), dom.cyclone_intensity)
+    stochastic = (ZERO_SCENARIO + 1):(cfg.n_cyclone_scenarios + 1)
+    n_events = count(>(0), @view dom.cyclone_intensity[:, stochastic])
     println(io, "SyntheticDomain \"$(cfg.name)\"")
     println(io, "  reefs        : $(cfg.reefs.n) ($(cfg.reefs.layout) layout, " *
                 "$(cfg.reefs.n_clusters) cluster(s))")
@@ -43,16 +47,17 @@ function Base.show(io::IO, ::MIME"text/plain", dom::SyntheticDomain)
     println(io, "  initial cover: $(round(100minimum(sum(dom.cover; dims=1)); digits=1))-" *
                 "$(round(100maximum(sum(dom.cover; dims=1)); digits=1))% of habitable area")
     for label in climate_labels(dom)
-        D = dom.dhw[label]
+        D = @view dom.dhw[label][:, :, (ZERO_SCENARIO + 1):end]  # stochastic scenarios
         first_dec = mean(@view D[1:min(10, T), :, :])
         last_dec = mean(@view D[max(1, T - 9):T, :, :])
         println(io, "  DHW (label $label): first decade $(round(first_dec; digits=1)) -> " *
                     "last decade $(round(last_dec; digits=1)) DHW, " *
-                    "$(cfg.n_dhw_scenarios) scenarios")
+                    "1 zero + $(cfg.n_dhw_scenarios) stochastic scenarios")
     end
     print(io, "  cyclones     : ", cfg.cyclones.enabled ?
         "$(round(n_events / cfg.n_cyclone_scenarios; digits=1)) events per scenario on average, " *
-        "$(cfg.n_cyclone_scenarios) scenarios" : "disabled")
+        "1 zero + $(cfg.n_cyclone_scenarios) stochastic scenarios" :
+        "disabled (all scenarios zero)")
     return nothing
 end
 
@@ -83,12 +88,15 @@ end
 Write `dom` as an ADRIA data package into `outdir` and return the path. ADRIA names the
 domain after the folder, so the geopackage is called `<basename(outdir)>.gpkg`.
 
+The folder's `README.md` reports every setting, a per-reef table and, when CairoMakie is
+loaded (`using CairoMakie`) and `figures=true`, the notebook's plots (saved in `figures/`).
+
 An existing non-empty folder is only replaced with `force=true`, and only if it already
 holds a data package (`datapackage.json`), so an unrelated folder is never deleted.
 """
 function write_domain(
     dom::SyntheticDomain, outdir::AbstractString=joinpath("domains", dom.config.name);
-    force::Bool=false
+    force::Bool=false, figures::Bool=true
 )::String
     outdir = normpath(abspath(outdir))
     name = basename(outdir)
@@ -106,7 +114,7 @@ function write_domain(
             "Refusing to replace $outdir: it does not contain a datapackage.json, so it " *
             "does not look like a domain written by this package."
         ))
-        rm(outdir; recursive=true)
+        _remove_domain_dir(outdir)
     end
 
     for sub in ("spatial", "connectivity", "DHWs", "waves", "cyclones")
@@ -136,19 +144,54 @@ function write_domain(
     )
     write_datapackage(joinpath(outdir, "datapackage.json"), name, dom)
     save_config(joinpath(outdir, "generator_config.toml"), dom.config)
-    write_domain_readme(joinpath(outdir, "README.md"), name, dom)
+    figure_files = if !figures
+        nothing
+    elseif plots_available()
+        # invokelatest: the extension may have been loaded after this code was compiled
+        Base.invokelatest(save_figures, dom, joinpath(outdir, "figures"))
+    else
+        @info "CairoMakie is not loaded, so the domain README has no plots. Run " *
+              "`using CairoMakie` before writing to include them."
+        nothing
+    end
+    write_domain_report(joinpath(outdir, "README.md"), name, dom; figures=figure_files)
 
     return outdir
 end
 
+# On Windows, files that are still open cannot be deleted. Loading a domain with ADRIA can
+# leave NetCDF handles open until they are garbage collected (ADRIA first tries
+# `open_dataset`, then falls back to NetCDF.jl), so collect garbage once and retry.
+function _remove_domain_dir(outdir::AbstractString)
+    try
+        rm(outdir; recursive=true)
+    catch err
+        err isa Base.IOError || rethrow()
+        GC.gc()
+        try
+            rm(outdir; recursive=true)
+        catch err2
+            err2 isa Base.IOError || rethrow()
+            throw(ArgumentError(
+                "Could not replace $outdir: some of its files are still open, e.g. by a " *
+                "domain loaded with ADRIA.load_domain in this Julia session. Release it " *
+                "(or restart Julia) or write to a different folder.\n" * sprint(showerror, err2)
+            ))
+        end
+    end
+    return nothing
+end
+
 """
-    generate_domain(cfg_or_path; outdir=joinpath("domains", <name>), force=false)::String
+    generate_domain(cfg_or_path; outdir=joinpath("domains", <name>), force=false, figures=true)::String
 
 Build and write a domain in one step, from a `DomainConfig` or the path to a TOML config.
 Returns the output folder, ready for `ADRIA.load_domain(outdir, <climate label>)`.
 """
-function generate_domain(cfg::DomainConfig; outdir=joinpath("domains", cfg.name), force=false)
-    return write_domain(build_domain(cfg), outdir; force=force)
+function generate_domain(
+    cfg::DomainConfig; outdir=joinpath("domains", cfg.name), force=false, figures=true
+)
+    return write_domain(build_domain(cfg), outdir; force=force, figures=figures)
 end
 function generate_domain(path::AbstractString; kwargs...)
     return generate_domain(load_config(path); kwargs...)

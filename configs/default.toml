@@ -15,8 +15,10 @@
 name = "SyntheticReefs"        # folder / geopackage name; letters, digits, _ - .
 timeframe = [2025, 2099]       # first and last simulated year (at least 26 years)
 seed = 1234                    # every random draw derives from this
-n_dhw_scenarios = 50           # DHW (and wave) scenarios per climate level
-n_cyclone_scenarios = 50
+# Stochastic scenario counts. Every DHW, wave and cyclone file also gets a disturbance-free
+# scenario 1 (all zeros), so the files hold n + 1 scenarios; the stochastic ones are 2..n+1.
+n_dhw_scenarios = 50           # stochastic DHW (and wave) scenarios per climate level
+n_cyclone_scenarios = 50       # stochastic cyclone scenarios
 
 [reefs]
 n = 10                         # 1-20 reefs; each reef is one ADRIA location
@@ -62,7 +64,7 @@ interannual_sd = 2.0           # SD of the regional anomaly
 ar1 = 0.3                      # year-to-year autocorrelation of the anomaly
 event_prob = 0.15              # chance of a marine heatwave in any year
 event_magnitude = [2.0, 6.0]   # extra DHW in a heatwave year, [min, max]
-event_years = []               # heatwave years forced in every scenario, e.g. [2030, 2045]
+event_years = []               # heatwave years forced in every stochastic scenario, e.g. [2030, 2045]
 reef_exposure = {min = 0.7, max = 1.3}  # multiplier per reef; {from = 0.6, to = 1.4} = refuge -> hotspot
 reef_offset = 0.0              # additive DHW per reef
 local_sd = 2.0                 # reef-level noise; 0 (with exposure 1) = identical DHW everywhere
@@ -77,7 +79,7 @@ local_sd = 2.0                 # reef-level noise; 0 (with exposure 1) = identic
 # System-wide: in a cyclone year every reef loses the same fraction of each group.
 enabled = true
 annual_prob = 0.1              # chance of a cyclone in any year
-event_years = []               # cyclone years forced in every scenario
+event_years = []               # cyclone years forced in every stochastic scenario
 intensity = [0.2, 1.0]         # per-event intensity (0-1), [min, max]
 # Mortality at intensity 1 for each group (same order as cover.composition)
 group_vulnerability = [0.6, 0.5, 0.4, 0.2, 0.1]

@@ -4,6 +4,7 @@ using Statistics: mean
 using SyntheticReefDomain
 using SyntheticReefDomain: attr_spec, resolve_attr, climate_params, TOPOLOGIES, LAYOUTS
 using ADRIA
+using CairoMakie  # loads the plotting extension (domain README figures)
 
 # Set RUN_ADRIA_SCENARIOS=false to skip the (slow) ADRIA scenario runs.
 const RUN_SCENARIOS = get(ENV, "RUN_ADRIA_SCENARIOS", "true") == "true"
@@ -28,6 +29,7 @@ row_sums(C) = vec(sum(C; dims=2))
         path = joinpath(TMP, "roundtrip.toml")
         save_config(path, cfg)
         @test config_to_dict(load_config(path)) == config_to_dict(cfg)
+        @test config_to_dict(load_config(IOBuffer(read(path)))) == config_to_dict(cfg)
 
         # The shipped configs load and validate
         cfg_dir = joinpath(@__DIR__, "..", "configs")
@@ -178,10 +180,10 @@ row_sums(C) = vec(sum(C; dims=2))
         reefs = build_reefs(cfg)
         dhw, regional = build_dhw(cfg, reefs)
         D = dhw[45]
-        @test size(D) == (75, 10, 6)
+        @test size(D) == (75, 10, 7)  # zero scenario + 6 stochastic
         @test all(D .>= 0)
-        @test size(regional[45]) == (75, 6)
-        @test mean(D[66:75, :, :]) > mean(D[1:10, :, :])  # warming trend
+        @test size(regional[45]) == (75, 7)
+        @test mean(D[66:75, :, 2:end]) > mean(D[1:10, :, 2:end])  # warming trend
 
         # Identical DHW on every reef
         same = small_cfg(; dhw=DHWConfig(; local_sd=0.0, reef_exposure=1.0, reef_offset=0.0))
@@ -206,8 +208,9 @@ row_sums(C) = vec(sum(C; dims=2))
         _, reg0 = build_dhw(quiet, build_reefs(quiet))
         _, reg = build_dhw(forced, build_reefs(forced))
         Δ = reg[45] .- reg0[45]
-        @test all(Δ[26, :] .≈ 10.0)
+        @test all(Δ[26, 2:end] .≈ 10.0)
         @test all(Δ[setdiff(1:75, 26), :] .== 0.0)
+        @test all(reg[45][:, 1] .== 0.0)  # not in the zero scenario
 
         # Reproducible
         @test build_dhw(cfg, reefs)[1][45] == D
@@ -216,7 +219,7 @@ row_sums(C) = vec(sum(C; dims=2))
 
         # Cyclones: system-wide, group specific, within [0, 1]
         M, intensity = build_cyclones(cfg, 10)
-        @test size(M) == (75, 10, 5, 5)
+        @test size(M) == (75, 10, 5, 6)  # zero scenario + 5 stochastic
         @test all(0 .<= M .<= 1)
         @test all(M[:, r, :, :] == M[:, 1, :, :] for r in 2:10)
         @test any(intensity .> 0)
@@ -228,13 +231,191 @@ row_sums(C) = vec(sum(C; dims=2))
 
         fixed = small_cfg(; cyclones=CycloneConfig(; annual_prob=0.0, event_years=[2030]))
         _, fi = build_cyclones(fixed, 10)
-        @test all(fi[6, :] .> 0)
+        @test all(fi[6, 2:end] .> 0)
+        @test fi[6, 1] == 0
         @test count(>(0), fi) == 5
 
         # Waves: ub_med repeated, with as many scenarios as DHW
         W = build_waves(cfg, reefs)
         @test size(W) == size(D)
         @test W[17, :, 3] == reefs.ub_med
+    end
+
+    @testset "Zero scenario" begin
+        # Scenario 1 is disturbance-free even with frequent, forced and severe events
+        cfg = small_cfg(;
+            dhw=DHWConfig(;
+                baseline=8.0, event_prob=1.0, event_years=[2030], reef_offset=3.0,
+                climate=Dict(1 => Dict(), 2 => Dict("trend_per_decade" => 3.0))
+            ),
+            cyclones=CycloneConfig(; annual_prob=1.0, event_years=[2030])
+        )
+        synth = build_domain(cfg)
+        for label in (1, 2)
+            @test size(synth.dhw[label], 3) == 7
+            @test all(synth.dhw[label][:, :, ZERO_SCENARIO] .== 0)
+            @test all(synth.dhw_regional[label][:, ZERO_SCENARIO] .== 0)
+            @test all(synth.dhw[label][:, :, 2:end] .> 0)
+        end
+        @test size(synth.cyclone_mortality, 4) == 6
+        @test all(synth.cyclone_mortality[:, :, :, ZERO_SCENARIO] .== 0)
+        @test all(synth.cyclone_intensity[:, ZERO_SCENARIO] .== 0)
+        @test all(synth.cyclone_intensity[:, 2:end] .> 0)
+        @test size(synth.waves, 3) == 7
+        @test synth.waves[:, :, ZERO_SCENARIO] == synth.waves[:, :, 2]
+
+        # ...and in ADRIA, including excluding it from sampling
+        path = write_domain(synth, joinpath(TMP, "ZeroScenario"))
+        dom = ADRIA.load_domain(path, "2")
+        @test all(Array(dom.dhw_scens)[:, :, 1] .== 0)
+        @test all(Array(dom.cyclone_mortality_scens)[:, :, :, 1] .== 0)
+        @test size(dom.dhw_scens, 3) == 7
+        ADRIA.set_factor_bounds!(dom, :dhw_scenario, Tuple(2.0:7.0))
+        ADRIA.set_factor_bounds!(dom, :cyclone_mortality_scenario, Tuple(2.0:6.0))
+        scens = ADRIA.sample_cf(dom, 32)
+        @test all(scens.dhw_scenario .>= 2)
+        @test all(scens.cyclone_mortality_scenario .>= 2)
+    end
+
+    @testset "Domain README report" begin
+        @test SyntheticReefDomain.plots_available()
+        cfg = small_cfg(;
+            name="Report",
+            dhw=DHWConfig(;
+                climate=Dict(1 => Dict(), 2 => Dict("trend_per_decade" => 3.0, "event_prob" => 0.3))
+            )
+        )
+        synth = build_domain(cfg)
+        path = write_domain(synth, joinpath(TMP, "Report"))
+        readme = read(joinpath(path, "README.md"), String)
+        figs = ["map.png", "connectivity.png", "cover.png", "dhw_1.png", "dhw_2.png", "cyclones.png"]
+        @test sort(readdir(joinpath(path, "figures"))) == sort(figs)
+        @test all(filesize(joinpath(path, "figures", f)) > 10_000 for f in figs)
+        @test all(occursin("](figures/$f)", readme) for f in figs)
+        for heading in ("### Domain", "### Reefs", "### Connectivity", "### Initial cover",
+            "### Heat stress (DHW)", "### Cyclones (system-wide)", "### Reefs (resolved values)",
+            "## Plots", "## Files")
+            @test occursin(heading, readme)
+        end
+        @test occursin("event_prob = 0.3", readme)  # per-level override listed
+        @test count(l -> startswith(l, "| reef_"), split(readme, "
+")) == 10
+        @test occursin("1 control (no heat stress) + 6 stochastic", readme)
+
+        # Without figures: all settings, no plots, and a note saying how to get them
+        path2 = write_domain(synth, joinpath(TMP, "ReportNoFigures"); figures=false)
+        readme2 = read(joinpath(path2, "README.md"), String)
+        @test !isdir(joinpath(path2, "figures"))
+        @test occursin("Plots were not generated", readme2)
+        @test occursin("### Reefs (resolved values)", readme2)
+        @test !occursin("](figures/", readme2)
+    end
+
+    @testset "C~scape export" begin
+        cfg = small_cfg(;
+            n=3, name="Cs3",
+            dhw=DHWConfig(; climate=Dict(45 => Dict(), 85 => Dict("trend_per_decade" => 2.5))),
+            cyclones=CycloneConfig(; annual_prob=0.3)
+        )
+        synth = build_domain(cfg)
+
+        # Options: TOML round trip and validation
+        opts = CscapeOptions(; region="Offshore_Northern", connectivity_scale=0.5)
+        f = joinpath(TMP, "cscape_export.toml")
+        save_cscape_options(f, opts)
+        @test load_cscape_options(f) == opts || SyntheticReefDomain.cscape_options_to_dict(load_cscape_options(f)) == SyntheticReefDomain.cscape_options_to_dict(opts)
+        @test_throws ArgumentError SyntheticReefDomain.validate(CscapeOptions(; demography_files=["a.rds"]))
+        @test_throws ArgumentError SyntheticReefDomain.validate(CscapeOptions(; region=" "))
+        @test_throws ArgumentError SyntheticReefDomain.validate(CscapeOptions(; brood_site_value=2.0))
+
+        # Cyclone categories and replicate mapping
+        @test cyclone_category.([0.0, 0.2, 0.21, 0.4, 0.6, 0.61, 0.8, 1.0]) == [0, 1, 2, 2, 3, 4, 4, 5]
+        @test SyntheticReefDomain.cyclone_scenario_for_replicate.(1:9, 4) == [1, 2, 3, 4, 2, 3, 4, 2, 3]
+
+        inputs = cscape_inputs(synth, opts)
+        T, n, R = 75, 3, 7  # replicates = 6 DHW scenarios + control
+        @test size(inputs.connectivity) == (n, n, 6)
+        @test all(inputs.connectivity[:, :, t] ≈ 0.5 .* permutedims(synth.connectivity) for t in 1:5)
+        brood = inputs.connectivity[:, :, 6]
+        @test all(brood[i, i] ≈ 0.9 * 0.03 for i in 1:n)
+        @test sort(collect(keys(inputs.disturbances))) == [45, 85]
+        A = inputs.disturbances[85]
+        @test size(A) == (T, n, R, 7)
+        @test A[:, :, 2:R, 2] == synth.dhw[85][:, :, 2:R]
+        @test all(A[:, :, 1, 2:3] .== 0)               # replicate 1: control
+        @test all(in(0:5), A[:, :, :, 3])               # integer categories
+        @test any(A[:, :, :, 3] .> 0)
+        @test all(A[:, :, :, 4:7] .== 0)                # no COTS
+        @test all(A[:, s, :, 3] == A[:, 1, :, 3] for s in 2:n)  # system-wide cyclones
+        ic = inputs.init_cover
+        @test names(ic) == ["reef_siteid"; CSCAPE_TYPES]
+        @test vec(sum(Matrix(ic[:, 2:end]); dims=2)) ≈ vec(sum(synth.cover; dims=1)) .* synth.reefs.k
+        @test ic.corym_non_acro == ic.brooder
+
+        # Writing without R: CSV inputs, init cover, script; force keeps added files
+        dir = joinpath(TMP, "Cs3_cscape")
+        r = write_cscape_project(synth, dir; options=opts, run_r=false)
+        @test !r.built
+        for fname in ("build_cscape_project.R", "README.md", "cscape_export.toml",
+            "generator_config.toml", joinpath("data", "initialisationData.csv"),
+            joinpath("inputs", "sites.csv"), joinpath("inputs", "connectivity.csv"),
+            joinpath("inputs", "scenarios.csv"), joinpath("inputs", "disturbances_45.csv"),
+            joinpath("inputs", "disturbances_85.csv"))
+            @test isfile(joinpath(dir, fname))
+        end
+        @test countlines(joinpath(dir, "inputs", "disturbances_45.csv")) == 1 + T * n * R
+        @test countlines(joinpath(dir, "inputs", "scenarios.csv")) == 3
+        @test occursin("demog_inputs_brooder.rds", read(joinpath(dir, "README.md"), String))
+        @test_throws ArgumentError write_cscape_project(synth, dir; options=opts, run_r=false)
+        touch(joinpath(dir, "data", "demog_inputs_acro_table.rds"))
+        write_cscape_project(synth, dir; options=opts, run_r=false, force=true)
+        @test isfile(joinpath(dir, "data", "demog_inputs_acro_table.rds"))
+        other = mkpath(joinpath(TMP, "NotAnExport"))
+        touch(joinpath(other, "keep.txt"))
+        @test_throws ArgumentError write_cscape_project(synth, other; run_r=false, force=true)
+
+        # Zip downloads
+        Z = SyntheticReefDomain.ZipArchives
+        zd = Z.ZipReader(domain_zip(synth; figures=false))
+        @test "Cs3/datapackage.json" in Z.zip_names(zd)
+        @test "Cs3/DHWs/dhwRCP85.nc" in Z.zip_names(zd)
+        zc = Z.ZipReader(cscape_zip(synth, opts; run_r=false))
+        @test "Cs3_cscape/build_cscape_project.R" in Z.zip_names(zc)
+        @test "Cs3_cscape/inputs/disturbances_85.csv" in Z.zip_names(zc)
+
+        # With R and cscape installed: build with R, then let C~scape read it (dry run) and
+        # simulate one replicate using the dummy demography of CScape.jl's 00_Verify project
+        status = rscript_status()
+        demog = joinpath(@__DIR__, "..", "..", "CScape.jl", "sandbox", "projects", "00_Verify", "data")
+        if status.rscript !== nothing && status.cscape && isdir(demog)
+            rdir = joinpath(TMP, "Cs3_cscape_R")
+            rr = write_cscape_project(synth, rdir; options=CscapeOptions())
+            @test rr.built
+            for fname in ("ScenarioID.xlsx", joinpath("data", "reef_sites_Cs3.rds"),
+                joinpath("data", "connectivity_Cs3.rds"), joinpath("data", "temporal_Cs3_45.rds"),
+                joinpath("data", "temporal_Cs3_85.rds"))
+                @test isfile(joinpath(rdir, fname))
+            end
+            for fname in readdir(demog)
+                startswith(fname, "demog_inputs_") && cp(joinpath(demog, fname), joinpath(rdir, "data", fname))
+            end
+            check = joinpath(TMP, "check_cscape.R")
+            write(check, """
+            fpath <- commandArgs(trailingOnly = TRUE)[1]
+            suppressMessages(library(cscape))
+            tmp <- readRDS(file.path(fpath, "data", "temporal_Cs3_85.rds"))
+            stopifnot(identical(dim(tmp\$disturbances), c(75L, 3L, 7L, 7L)))
+            stopifnot(all(tmp\$disturbances[, , 1, 2:3] == 0))
+            invisible(run_cscape(85, fpath, rep_index = 2, dry_run = TRUE))
+            invisible(run_cscape(85, fpath, rep_index = 2))
+            stopifnot(file.exists(file.path(fpath, "model_outputs", "Array_scenario_85_rep_2_draw_NA.rds")))
+            cat("CSCAPE_OK\n")
+            """)
+            out = read(pipeline(`$(status.rscript) $check $rdir`; stderr=devnull), String)
+            @test occursin("CSCAPE_OK", out)
+        else
+            @info "Skipping the C~scape R round trip (needs Rscript, the cscape package and CScape.jl's 00_Verify demography)."
+        end
     end
 
     @testset "ADRIA round trip" begin
@@ -244,7 +425,7 @@ row_sums(C) = vec(sum(C; dims=2))
             name = "RT_$(n)_$(topology)"
             cfg = small_cfg(; n=n, name=name, connectivity=ConnectivityConfig(; topology=topology))
             synth = build_domain(cfg)
-            path = write_domain(synth, joinpath(TMP, name))
+            path = write_domain(synth, joinpath(TMP, name); figures=false)
             @test isfile(joinpath(path, "spatial", "RT_$(n)_$(topology).gpkg"))
 
             dom = ADRIA.load_domain(path, "45")
@@ -254,7 +435,7 @@ row_sums(C) = vec(sum(C; dims=2))
             @test Array(dom.conn) == synth.connectivity
             @test Array(dom.dhw_scens) == synth.dhw[45]
             @test Array(dom.wave_scens) == synth.waves
-            @test size(dom.cyclone_mortality_scens) == (75, n, 5, 5)
+            @test size(dom.cyclone_mortality_scens) == (75, n, 5, 6)
             @test Array(dom.cyclone_mortality_scens) == synth.cyclone_mortality
             @test dom.loc_data.k ≈ synth.reefs.k ./ 100
             @test dom.loc_data.area ≈ synth.reefs.area
@@ -269,7 +450,7 @@ row_sums(C) = vec(sum(C; dims=2))
 
             # Writing again needs force=true; force only replaces data packages
             @test_throws ArgumentError write_domain(synth, path)
-            @test write_domain(synth, path; force=true) == path
+            @test write_domain(synth, path; force=true, figures=false) == path
         end
 
         # Several climate levels -> one DHW file each
@@ -291,7 +472,7 @@ row_sums(C) = vec(sum(C; dims=2))
         @testset "ADRIA scenario runs" begin
             for n in (2, 10, 20)
                 cfg = small_cfg(; n=n, name="Run_$n")
-                path = write_domain(build_domain(cfg), joinpath(TMP, "Run_$n"))
+                path = write_domain(build_domain(cfg), joinpath(TMP, "Run_$n"); figures=false)
                 dom = ADRIA.load_domain(path, "45")
                 scens = ADRIA.sample_cf(dom, 4)
                 rs = ADRIA.run_scenarios(dom, scens, "45"; show_progress=false)

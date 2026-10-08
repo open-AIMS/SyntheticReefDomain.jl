@@ -6,6 +6,7 @@
 # The domain is written to domains/<name> (replacing an earlier version of the same domain).
 
 using SyntheticReefDomain
+using CairoMakie  # adds the plots to the domain's README.md
 using ADRIA
 using Printf, Statistics
 

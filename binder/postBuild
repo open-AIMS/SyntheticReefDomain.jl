@@ -1,0 +1,11 @@
+#!/bin/bash
+set -ex
+
+# Register Pluto with jupyter-server-proxy
+mkdir -p ~/.jupyter
+cp binder/jupyter_server_config.py ~/.jupyter/jupyter_server_config.py
+
+# Install and precompile the notebook environment, then open both notebooks once so the
+# first launch on Binder is faster
+julia --project=notebooks -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+julia --project=notebooks binder/warmup.jl

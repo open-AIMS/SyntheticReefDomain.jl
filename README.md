@@ -15,6 +15,48 @@ There are two ways in:
 - **Notebook**: a Pluto notebook with sliders and live previews (map, connectivity, cover,
   DHW and cyclone time series) that writes the domain or saves its TOML config.
 
+A second, separate notebook exports a domain as an input project for the original R package
+[cscape](https://github.com/open-AIMS/c-scape) (see *C~scape (R) export*).
+
+## Getting started
+
+**With Julia (Windows):**
+1. Install Julia 1.11 or newer (https://julialang.org/install).
+2. Get this repository.
+3. Double-click a launcher:
+   - `start_reef_builder.bat` for the domain builder;
+   - `start_cscape_export.bat` for the C~scape export.
+
+The first start installs and compiles the packages, which takes 10-15 minutes. Later starts
+take under a minute. The notebook opens in your web browser. The first time, Pluto may show
+*Safe preview*: click **Run notebook code**.
+
+**Without Julia (Binder):** once this repository is public on GitHub, the notebooks run in
+the browser through [mybinder.org](https://mybinder.org). It is free and needs no account or
+install. Replace `OWNER/REPO` with the GitHub location:
+
+- Domain builder:
+  `https://mybinder.org/v2/gh/OWNER/REPO/HEAD?urlpath=pluto%2Fopen%3Fpath%3Dnotebooks%2Freef_builder.jl`
+- C~scape export:
+  `https://mybinder.org/v2/gh/OWNER/REPO/HEAD?urlpath=pluto%2Fopen%3Fpath%3Dnotebooks%2Fcscape_export.jl`
+
+Binder limits:
+- the first launch builds the image, which is slow; later launches are faster;
+- about 1-2 GB of memory;
+- idle sessions stop after about 10 minutes, and everything in a session is deleted when it
+  ends. Use **Prepare download (.zip)** to keep your domain or C~scape project;
+- no R, so the C~scape export there contains the inputs plus a script to run in R later.
+
+The Binder setup lives in `binder/` (following
+[pluto-on-binder](https://github.com/fonsp/pluto-on-binder)):
+- `Project.toml` picks the Julia version;
+- `requirements.txt` and `jupyter_server_config.py` serve Pluto through jupyter-server-proxy;
+- `postBuild` installs and precompiles the notebook environment and opens both notebooks
+  once (`warmup.jl`).
+
+Before making the repository public, check the Moore-derived default ranges with their
+owners (see *Provenance*).
+
 ## Status
 
 - Output verified against ADRIA 0.17.2 (`ADRIA.jl` branch `CscapeIntegration`).
@@ -26,6 +68,11 @@ There are two ways in:
     and 10 reefs.
 - C~scape translation (`CscapeInterface.domain_to_cscape_inputs`) picks up `ub_med` from the
   geopackage (`sandbox/02_cscape_translate.jl`).
+- C~scape (R) export verified with cscape 1.0.0 (R 4.4.2). An exported project builds with
+  R, passes `run_cscape(..., dry_run = TRUE)`, and runs a full replicate (75 years) with the
+  dummy demography of CScape.jl's `00_Verify` project.
+- The Binder pieces were checked locally (warm-up and the Pluto start command). The
+  mybinder.org launch itself can only be tested once the repository is public.
 - Not covered: waves as a disturbance (ADRIA's wave mortality is switched off), 5-D MCB DHW
   data, and multiple sites per reef (each reef is one ADRIA location).
 
@@ -52,6 +99,7 @@ julia --project=sandbox -e "using Pkg; Pkg.instantiate()"      # example scripts
 
 ```julia
 using SyntheticReefDomain
+using CairoMakie   # optional: adds the plots to each domain's README.md
 
 # From a config file (writes domains/SyntheticReefs)
 path = generate_domain("configs/default.toml")
@@ -78,11 +126,31 @@ adria_dom = ADRIA.load_domain("domains/Chain5", 45)
 `configs/examples/` show a downstream-only chain with three climate levels, isolated reefs with
 explicit refuges, and a cyclone-heavy clustered system.
 
+### Domain report
+
+Every written domain gets a `README.md` that documents it:
+
+- a summary and the `ADRIA.load_domain` call;
+- every setting, in the notebook's sections (Domain, Reefs, Connectivity, Initial cover,
+  Heat stress, Cyclones), including per-climate-level overrides;
+- a per-reef table of the resolved values (position, area, k, depth, `ub_med`, DHW exposure
+  and offset, initial cover, mean DHW);
+- the notebook's plots, saved as PNGs in `figures/`: reef map with connectivity,
+  connectivity matrix, initial cover, DHW per climate level and cyclones;
+- a list of the files in the package.
+
+The plots come from an optional extension and are included when CairoMakie is loaded
+(`using CairoMakie`; the notebook always loads it). Without it, or with
+`write_domain(dom, path; figures=false)`, the README still lists every setting and says how
+to add the plots. The same plots are available directly as `plot_map(dom)`,
+`plot_connectivity(dom)`, `plot_cover(dom)`, `plot_dhw(dom, label, scenario)` and
+`plot_cyclones(dom, scenario)`.
+
 ## What you can set
 
 | Section | Settings |
 | --- | --- |
-| `[domain]` | name, timeframe (at least 26 years), seed, number of DHW and cyclone scenarios |
+| `[domain]` | name, timeframe (at least 26 years), seed, number of stochastic DHW and cyclone scenarios (scenario 1 is always disturbance-free; see below) |
 | `[reefs]` | number of reefs (1-20); layout (`line`, `grid`, `ring`, `random`, `clustered`); spacing; bearing; clusters; area, habitable fraction `k`, depth, `ub_med`, habitat, CoralBlox calibration group |
 | `[connectivity]` | topology (`isolated`, `chain`, `ring`, `all_to_all`, `distance_decay`, `random`); self-recruitment; strength; asymmetry and reach (chain/ring); decay distance; link density |
 | `[cover]` | total cover per reef, as % of habitable or of whole-reef area; functional-group composition; per-reef variation of the mix |
@@ -133,6 +201,28 @@ Cyclones are system-wide. In a cyclone year every reef loses the same fraction o
 functional group: `intensity * group_vulnerability[g]`. By default tabular Acropora are the
 most vulnerable and large massives the least.
 
+### Scenario 1: no disturbance
+
+Every domain has a disturbance-free control scenario. Scenario 1 of every DHW file (each
+climate level) and of the cyclone file is all zeros, for every reef and year. The configured
+stochastic scenarios follow as 2..n+1, so with `n_dhw_scenarios = 50` the DHW files hold 51
+scenarios. The wave file matches that count; its scenario 1 holds the usual constant
+`ub_med`, since waves are not a disturbance here.
+
+In ADRIA:
+
+- `dhw_scenario` / `cyclone_mortality_scenario` = 1 selects the control scenario. It is also
+  these factors' nominal value, so runs that use nominal factor values are disturbance-free.
+- Sampling (`ADRIA.sample`, `sample_cf`) draws uniformly over all scenarios, so about 1 in
+  n+1 sampled runs is disturbance-free. To leave it out:
+
+  ```julia
+  n = size(dom.dhw_scens, 3)                      # stochastic + 1
+  ADRIA.set_factor_bounds!(dom, :dhw_scenario, Tuple(2.0:Float64(n)))
+  ADRIA.set_factor_bounds!(dom, :cyclone_mortality_scenario,
+      Tuple(2.0:Float64(size(dom.cyclone_mortality_scens, 4))))
+  ```
+
 ### Waves
 
 There is no wave disturbance (ADRIA's wave mortality is commented out). The wave file holds
@@ -144,11 +234,20 @@ each reef's `ub_med` as a constant series, because:
 
 ## Notebook
 
-```julia
-julia --project=notebooks -e "using Pluto; Pluto.run(notebook=\"notebooks/reef_builder.jl\")"
+```
+julia --project=notebooks notebooks/run.jl
 ```
 
-1. Pick a starting config (`configs/*.toml` and `configs/examples/*.toml`).
+(From the repo root. Or, inside Julia: `using Pluto; Pluto.run(notebook="notebooks/reef_builder.jl")`.)
+
+1. Pick a starting config. You can do this in two ways:
+   - **From the dropdown**, which lists `configs/*.toml`, `configs/examples/*.toml` and the
+     `generator_config.toml` of every domain already in `domains/`, so you can continue from
+     a domain you wrote earlier. The list is read when the notebook starts.
+   - **Open any `.toml` file** with the file button, which opens the Windows file dialog.
+     A file opened this way wins over the dropdown. Choosing from the dropdown again clears
+     it. If the file is not a valid config, a warning says why and the dropdown choice is
+     used instead.
 2. Adjust the controls. The domain is rebuilt in memory on every change and previewed:
    - a reef map with connectivity arrows;
    - a connectivity matrix;
@@ -157,9 +256,63 @@ julia --project=notebooks -e "using Pluto; Pluto.run(notebook=\"notebooks/reef_b
    - cyclone years and mortality per group.
 3. Press **Write domain** (default `domains/<name>`) and/or **Save config** (default
    `configs/<name>.toml`). Neither overwrites existing files unless *replace* is ticked.
+   The written domain's `README.md` records every setting and shows the same plots (see
+   *Domain report*). **Prepare download (.zip)** gives the same domain as a zip, which is
+   useful on Binder.
 
 Per-reef lists from the starting file are kept when their length matches the number of
 reefs. Untick the checkbox at the top to use the range controls instead.
+
+## C~scape (R) export
+
+`notebooks/cscape_export.jl` (or `start_cscape_export.bat`, or
+`julia --project=notebooks notebooks/run_cscape.jl`) turns a synthetic domain into an input
+project for the R package [cscape](https://github.com/open-AIMS/c-scape). It is kept
+separate from the domain builder.
+
+1. Choose the domain: one already in `domains/`, a config, or any `.toml` file. The domain
+   is rebuilt from its settings, so the C~scape inputs match the ADRIA domain exactly.
+2. Set the C~scape options:
+   - Region: a `Cluster` level of the demography models, e.g. `Offshore_Central`.
+   - Demography file names.
+   - Spawner connectivity scale.
+   - Brooder dispersal.
+
+   The options of an earlier export of the same domain are loaded as the starting point.
+3. Check the previews: the site table, spawner and brooder connectivity, cyclone
+   categories per replicate, and initial cover for the six C~scape types. Warnings flag
+   reefs outside the demography models' depth or `ub_med` range.
+4. **Write C~scape project** (default `<domain>/cscape/`) or **Prepare download (.zip)**.
+
+From Julia:
+
+```julia
+write_cscape_project(dom, "domains/Chain5/cscape"; options=CscapeOptions(; region="Offshore_Central"))
+```
+
+Julia cannot write `.rds`, so the export writes CSV inputs (`inputs/`) plus
+`build_cscape_project.R`. The script turns them into `ScenarioID.xlsx` and
+`data/*.rds` using cscape's own helpers. It runs automatically when R and cscape are
+installed; otherwise run `Rscript build_cscape_project.R` later.
+
+**Demography files are not part of the export.** Copy the six `demog_inputs_<type>.rds`
+files into the project's `data/` folder. Then run in R:
+`cscape::run_cscape_batch(45, "<project folder>")`. Scenario IDs are the climate labels.
+
+| C~scape input | From the synthetic domain |
+| --- | --- |
+| site table (`reef_sites_<name>.rds`) | `reef_siteid`, `k` (%), `area` (m²), `depth_med`, `ub_med`, plus `long`/`lat`, `habitat`, `cluster_id` |
+| connectivity `[destination, source, type]` | Spawning types: the domain matrix transposed (x scale). Brooder: 90% of `brood_site_value` stays home, 10% goes to reefs within the radius (as in CscapeInterface) |
+| temporal file, one per climate label | Replicate r = DHW scenario r, so **replicate 1 is the disturbance-free control**. `DHW_site` = per-reef DHW. Cyclone = category `ceil(5 x intensity)` (1-5), the same on every reef. No COTS, no external eggs, `temp_growth` 1 |
+| `initialisationData.csv` | % of site area. Corymbose non-Acropora is split evenly between `corym_non_acro` and `brooder` |
+| `ScenarioID.xlsx` | one row per climate label, `num_repeats` = all replicates, `Region` and `Growth_Surv_file` from the options |
+
+Differences from the ADRIA run to keep in mind:
+- **Cyclones:** C~scape computes cyclone mortality from the category (wind speed), so the
+  domain's per-group cyclone vulnerabilities are not used.
+- **Connectivity:** C~scape uses connectivity as absolute transfer probabilities, while
+  ADRIA's own model only uses proportions. Use the scale option if the domain's values are
+  too high for C~scape.
 
 ## Running in ADRIA
 
@@ -184,10 +337,11 @@ The output mirrors `ADRIA.jl/ADRIA/test/data/Test_domain` (data package version 
 | `spatial/<Name>.gpkg` | EPSG:4326 reef polygons. Columns: `reef_siteid`/`UNIQUE_ID` (`reef_01`...), `cluster_id`, `k` (%), `area` (m²), `depth_med`, `ub_med`, `CB_CALIB_GROUPS`, plus informational `habitat`, `zone_type`, `dhw_exposure`, `dhw_offset`, `lon`, `lat`, `x_km`, `y_km` |
 | `spatial/coral_cover.nc` | `layer(species=5, locations)`, fraction of habitable area; ADRIA splits it into 7 size classes |
 | `connectivity/connectivity_<Y0>_synthetic.csv` | source (rows) x sink (columns) transfer probabilities |
-| `DHWs/dhwRCP<label>.nc` | `dhw(timesteps, sites, member)` and a `reef_siteid` variable |
+| `DHWs/dhwRCP<label>.nc` | `dhw(timesteps, sites, member)` and a `reef_siteid` variable; member 1 is all zeros |
 | `waves/wave_RCP<label>.nc` | `Ub(timesteps, sites, member)` |
-| `cyclones/cyclone_mortality.nc` | `layer(timesteps, locations, species=5, scenarios)` |
-| `generator_config.toml`, `README.md` | the exact config used (regenerate with `generate_domain`) and a summary |
+| `cyclones/cyclone_mortality.nc` | `layer(timesteps, locations, species=5, scenarios)`; scenario 1 is all zeros |
+| `generator_config.toml` | the exact config used (regenerate with `generate_domain`) |
+| `README.md`, `figures/*.png` | report of all settings, a per-reef table and the plots (see *Domain report*) |
 
 ## Things to know
 
@@ -217,6 +371,73 @@ The output mirrors `ADRIA.jl/ADRIA/test/data/Test_domain` (data package version 
   - adding reefs leaves the existing reefs' attributes and noise unchanged.
 - Reef polygons are irregular ellipses with exactly the requested area. At the default
   spacing they are small dots on the map, but ADRIA only uses their centroids.
+
+## Provenance
+
+All code in this repository was written for it (with Claude Code, October 2026). No code was
+copied from other projects, papers or websites. Other projects were used in only two ways:
+their code and data were read to work out the format ADRIA expects and to pick default
+values, and open-source libraries are used as ordinary dependencies.
+
+**None of the ecological default values are peer reviewed or calibrated.** They are
+placeholders for building plausible test systems. Replace them with literature values, and
+cite those, before using results in a publication.
+
+### Format
+
+| Source | Used for | Licence | Peer reviewed |
+| --- | --- | --- | --- |
+| [ADRIA.jl](https://github.com/open-AIMS/ADRIA.jl) (AIMS, DOI [10.25845/E9VT-4G35](https://doi.org/10.25845/E9VT-4G35)): loaders in `Domain.jl`, `io/inputs.jl`, `io/initial_coral_cover.jl`, `ecosystem/connectivity.jl`, `scenario.jl` | File names, NetCDF layouts, required columns, ID handling, RCP label parsing, connectivity normalisation | MIT | No (software archive) |
+| ADRIA `test/data/Test_domain` | Layout of every output file | MIT | No (test data) |
+| [CscapeInterface.jl](https://github.com/open-AIMS/CscapeAccess) `domain_translator.jl` | The `ub_med` column C~scape reads | MIT | No |
+| CScape.jl `KNOWN_QUIRKS.md` (documentation only, no code) | Distinct `(ub_med, depth_med)` pairs | GPL | No |
+| [cscape](https://github.com/open-AIMS/c-scape) R package: `run_cscape.R`, `load_data.R`, `site_loop.R`, `ipm_pred.R`, `simulate_reef.R` (read, not copied) | C~scape project layout, file structures, cyclone categories, scenario-table columns. The generated `build_cscape_project.R` *calls* cscape's exported functions | GPL-3 | No |
+| CscapeInterface.jl `domain_translator.jl` | Conventions for the C~scape export: transposed connectivity, brooder matrix, cover split, units | MIT | No |
+| [pluto-on-binder](https://github.com/fonsp/pluto-on-binder) | Approach for `binder/` (jupyter-server-proxy, Pluto settings) | MIT | No |
+| [open-AIMS/ADRIA-data-specs](https://github.com/open-AIMS/ADRIA-data-specs) | Not consulted. This is the authoritative spec to check against. | -- | -- |
+
+### Default values
+
+| Setting | Default | Source | Status |
+| --- | --- | --- | --- |
+| `area_m2`, `k_percent`, `depth_med`, `ub_med` | 60,000-93,000 m², 45-63 %, 2-15 m, 0.23-0.55 m/s | Interquartile ranges of the Moore_2025-08-22_v080 ADRIA domain (AIMS / RRAP; spatial data from A. Cresswell) | No licence stated, unpublished: confirm with the data owners before a public release |
+| Habitat names | Crest, Outer Flat, Sheltered Slope, Slope | Moore domain categories | As above |
+| `cover.composition` | 0.26, 0.25, 0.07, 0.19, 0.23 | Mean cover per functional group in ADRIA's Test_domain | Test data, not observations |
+| `cover.total_percent` | 10-40 % of habitable area | Placeholder (Test_domain per-location totals span about 2-45 %) | Not calibrated |
+| `[dhw]` parameters | baseline 3.5, trend 1.2 DHW/decade, SD 2, AR(1) 0.3, heatwave probability 0.15, size 2-6 DHW, exposure 0.7-1.3, local SD 2 | Tuned so the default domain resembles Test_domain DHW (about 5 DHW in the first decade, 13 in the last) | Not calibrated to observations or climate projections |
+| `[cyclones]` parameters | annual probability 0.1, intensity 0.2-1.0, vulnerability 0.6 / 0.5 / 0.4 / 0.2 / 0.1 | Placeholders. The ordering (Acropora most, massives least susceptible) follows general understanding; the numbers come from no source | Not calibrated |
+| `[connectivity]` parameters | distance decay over 10 km, self-recruitment 0.2, strength 0.05 | Illustrative placeholders | Not calibrated |
+| `reefs.center` | 146.0° E, 18.0° S | Arbitrary location in the central Great Barrier Reef region | -- |
+
+### Methods
+
+The methods are standard, written from general knowledge without a specific source:
+
+- great-circle (haversine) distances;
+- an equirectangular km to lon/lat approximation;
+- shoelace polygon areas;
+- an AR(1) anomaly process;
+- Dirichlet sampling of cover composition;
+- an FNV-1a hash that derives the random-number seed for each part of the domain.
+
+The model structures are the author's own simple choices, not taken from the literature:
+
+- reef DHW = exposure x regional signal + offset + noise;
+- cyclone mortality = intensity x group vulnerability;
+- the connectivity topologies.
+
+### Dependencies
+
+All used as libraries; no code was copied from them.
+
+| Package | Licence |
+| --- | --- |
+| NetCDF.jl, GeoDataFrames.jl, ArchGDAL.jl, GeoFormatTypes.jl, DataFrames.jl, Distributions.jl, StableRNGs.jl, JSON.jl, ZipArchives.jl | MIT |
+| R packages called by the generated C~scape build script (cscape, sf, writexl); not shipped here | GPL-3 (cscape), GPL-2 or MIT (sf), BSD-2 (writexl) |
+| Pluto.jl (notebook only) | MIT |
+| CairoMakie.jl (notebook, and optional plots in the domain README via a package extension) | MIT |
+| PlutoUI.jl (notebook only) | Unlicense (public domain) |
+| ADRIA.jl, ADRIAIndicators.jl (tests and sandbox only) | MIT |
 
 ## Tests
 

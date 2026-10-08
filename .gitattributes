@@ -1,0 +1,6 @@
+# Scripts run on Linux (Binder) need LF line endings
+binder/postBuild text eol=lf
+binder/*.py text eol=lf
+*.sh text eol=lf
+# Windows launchers keep CRLF
+*.bat text eol=crlf

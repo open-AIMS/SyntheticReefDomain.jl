@@ -153,7 +153,7 @@ mortality, which differs between functional groups.
 
 - `enabled` : `false` writes an all-zero cyclone file
 - `annual_prob` : probability of a cyclone in any year (per scenario)
-- `event_years` : years with a cyclone in every scenario
+- `event_years` : years with a cyclone in every stochastic scenario (not scenario 1)
 - `intensity` : `[min, max]` of the per-event intensity (0-1), drawn uniformly
 - `group_vulnerability` : mortality at intensity 1 for each group in `FUNCTIONAL_GROUPS`
 
@@ -171,7 +171,13 @@ end
     DomainConfig(; name, timeframe, seed, n_dhw_scenarios, n_cyclone_scenarios,
                    reefs, connectivity, cover, dhw, cyclones)
 
-Complete description of a synthetic domain. Build one with keywords, e.g.
+Complete description of a synthetic domain.
+
+`n_dhw_scenarios` and `n_cyclone_scenarios` count the *stochastic* scenarios. Every DHW, wave
+and cyclone file also gets a disturbance-free scenario 1 (all zeros), so the files hold
+`n + 1` scenarios and the stochastic ones are 2..n+1.
+
+Build one with keywords, e.g.
 
 ```julia
 cfg = DomainConfig(;
@@ -430,12 +436,15 @@ end
 
 """
     load_config(path::AbstractString)::DomainConfig
+    load_config(io::IO)::DomainConfig
     load_config(d::AbstractDict)::DomainConfig
 
-Read a configuration from a TOML file (or a parsed TOML dictionary). Missing keys take
+Read a configuration from a TOML file, a stream of TOML text (e.g.
+`IOBuffer(file_bytes)` from an uploaded file) or a parsed TOML dictionary. Missing keys take
 their default values; unknown keys raise an error so typos are not silently ignored.
 """
 load_config(path::AbstractString)::DomainConfig = load_config(TOML.parsefile(path))
+load_config(io::IO)::DomainConfig = load_config(TOML.parse(io))
 function load_config(d::AbstractDict)::DomainConfig
     sections = ["domain", "reefs", "connectivity", "cover", "dhw", "cyclones"]
     _check_keys(d, sections, "the top level")
