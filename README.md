@@ -31,14 +31,14 @@ The first start installs and compiles the packages, which takes 10-15 minutes. L
 take under a minute. The notebook opens in your web browser. The first time, Pluto may show
 *Safe preview*: click **Run notebook code**.
 
-**Without Julia (Binder):** once this repository is public on GitHub, the notebooks run in
-the browser through [mybinder.org](https://mybinder.org). It is free and needs no account or
-install. Replace `OWNER/REPO` with the GitHub location:
+**Without Julia (Binder):** the notebooks run in the browser through
+[mybinder.org](https://mybinder.org). It is free and needs no account or install. Click a
+badge:
 
 - Domain builder:
-  `https://mybinder.org/v2/gh/OWNER/REPO/HEAD?urlpath=pluto%2Fopen%3Fpath%3Dnotebooks%2Freef_builder.jl`
+  [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/open-AIMS/SyntheticReefDomain.jl/HEAD?urlpath=pluto%2Fopen%3Fpath%3Dnotebooks%2Freef_builder.jl)
 - C~scape export:
-  `https://mybinder.org/v2/gh/OWNER/REPO/HEAD?urlpath=pluto%2Fopen%3Fpath%3Dnotebooks%2Fcscape_export.jl`
+  [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/open-AIMS/SyntheticReefDomain.jl/HEAD?urlpath=pluto%2Fopen%3Fpath%3Dnotebooks%2Fcscape_export.jl)
 
 Binder limits:
 - the first launch builds the image, which is slow; later launches are faster;
@@ -53,9 +53,6 @@ The Binder setup lives in `binder/` (following
 - `requirements.txt` and `jupyter_server_config.py` serve Pluto through jupyter-server-proxy;
 - `postBuild` installs and precompiles the notebook environment and opens both notebooks
   once (`warmup.jl`).
-
-Before making the repository public, check the Moore-derived default ranges with their
-owners (see *Provenance*).
 
 ## Status
 
