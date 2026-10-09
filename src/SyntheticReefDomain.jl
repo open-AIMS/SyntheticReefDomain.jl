@@ -121,6 +121,14 @@ Initial cover per reef for the six C~scape types (% of site area). Requires `usi
 """
 function plot_cscape_cover end
 
+"""
+    save_cscape_figures(dom::SyntheticDomain, options::CscapeOptions, dir)::Vector{String}
+
+Save the domain plots (as `save_figures`) and the three C~scape plots as PNGs in `dir` and
+return their file names. Requires `using CairoMakie`.
+"""
+function save_cscape_figures end
+
 """Whether the plotting extension is loaded (i.e. `using CairoMakie` has been run)."""
 plots_available() = Base.get_extension(@__MODULE__, :SyntheticReefDomainCairoMakieExt) !== nothing
 
@@ -133,6 +141,6 @@ export plot_map, plot_connectivity, plot_cover, plot_dhw, plot_cyclones, save_fi
 export CscapeOptions, cscape_inputs, write_cscape_project, load_cscape_options,
     save_cscape_options, rscript_status, cyclone_category, CSCAPE_TYPES, CSCAPE_REGIONS
 export domain_zip, cscape_zip
-export plot_cscape_connectivity, plot_cscape_cyclones, plot_cscape_cover
+export plot_cscape_connectivity, plot_cscape_cyclones, plot_cscape_cover, save_cscape_figures
 
 end

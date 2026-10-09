@@ -12,7 +12,17 @@ const FIGURE_TITLES = Dict(
     "cyclones.png" => ("Cyclones",
         "Left: cyclone years and intensities in scenario 2 (the first stochastic scenario). " *
         "Right: mortality per functional group for an average and the strongest event; " *
-        "every reef loses the same fraction.")
+        "every reef loses the same fraction."),
+    "cscape_connectivity.png" => ("C~scape connectivity",
+        "Transfer probabilities as written for C~scape (destination rows, source columns). " *
+        "The five broadcast-spawning types share the domain's matrix (times the connectivity " *
+        "scale); the brooder keeps 90% of its dispersal at home."),
+    "cscape_cyclones.png" => ("C~scape cyclone categories",
+        "Cyclone category (0-5) per year and replicate, the same on every reef. Replicate 1 " *
+        "is the disturbance-free control."),
+    "cscape_cover.png" => ("C~scape initial cover",
+        "Initial cover per reef for the six C~scape types, in % of site area " *
+        "(`data/initialisationData.csv`).")
 )
 const DHW_CAPTION =
     "Left: DHW of every reef (colour = exposure) and the regional signal in scenario 2 " *
@@ -50,7 +60,8 @@ function _table(io::IO, header, rows)
     return nothing
 end
 
-function _settings(io::IO, name::AbstractString, dom::SyntheticDomain)
+# `adria=false` leaves out the ADRIA file names (for the C~scape project's report)
+function _settings(io::IO, name::AbstractString, dom::SyntheticDomain; adria::Bool=true)
     cfg = dom.config
     r, c, cv, d, cy = cfg.reefs, cfg.connectivity, cfg.cover, cfg.dhw, cfg.cyclones
     labels = climate_labels(cfg)
@@ -65,7 +76,8 @@ function _settings(io::IO, name::AbstractString, dom::SyntheticDomain)
         ["Name", name == cfg.name ? name : "$name (configured as $(cfg.name))"],
         ["Years", "$(cfg.timeframe[1])-$(cfg.timeframe[2]) ($T years)"],
         ["Seed", cfg.seed],
-        ["Climate labels", join(["$l (`DHWs/dhwRCP$l.nc`)" for l in labels], ", ")],
+        ["Climate labels", adria ? join(["$l (`DHWs/dhwRCP$l.nc`)" for l in labels], ", ") :
+                           join(labels, ", ")],
         ["DHW scenarios", "1 control (no heat stress) + $(cfg.n_dhw_scenarios) stochastic"],
         ["Cyclone scenarios", "1 control (no cyclones) + $(cfg.n_cyclone_scenarios) stochastic"]
     ])
@@ -89,9 +101,9 @@ function _settings(io::IO, name::AbstractString, dom::SyntheticDomain)
         ["Median wave orbital velocity `ub_med` (m/s)", describe_spec(r.ub_med)],
         ["Habitat", _describe_categorical(r.habitat)],
         ["CoralBlox calibration group", _describe_categorical(r.cb_calib_group)],
-        ["Nudge identical (ub_med, depth_med) pairs apart", _yes(r.distinct_ub_depth)],
-        ["Wave file", r.waves_from_ub_med ? "each reef's `ub_med`, constant" : "zeros"]
+        ["Nudge identical (ub_med, depth_med) pairs apart", _yes(r.distinct_ub_depth)]
     ])
+    adria && push!(rows, ["Wave file", r.waves_from_ub_med ? "each reef's `ub_med`, constant" : "zeros"])
     _table(io, ["Setting", "Value"], rows)
 
     println(io, "### Connectivity\n")
@@ -156,11 +168,11 @@ function _settings(io::IO, name::AbstractString, dom::SyntheticDomain)
         other = isempty(overrides) ? "--" :
             join(["$k = $(repr(d.climate[label][k]))" for k in overrides], "; ")
         D = stochastic(dom.dhw[label])
-        [label, "`DHWs/dhwRCP$label.nc`", _num(p.trend_per_decade), other,
-         _fixed(mean(@view D[1:min(10, T), :, :]), 1), _fixed(mean(@view D[max(1, T - 9):T, :, :]), 1)]
+        [label; adria ? ["`DHWs/dhwRCP$label.nc`"] : String[]; _num(p.trend_per_decade); other;
+         _fixed(mean(@view D[1:min(10, T), :, :]), 1); _fixed(mean(@view D[max(1, T - 9):T, :, :]), 1)]
     end
-    _table(io, ["Label", "File", "Trend (DHW/decade)", "Other overrides",
-                "Mean DHW, first decade", "Mean DHW, last decade"], level_rows)
+    _table(io, ["Label"; adria ? ["File"] : String[]; "Trend (DHW/decade)"; "Other overrides";
+                "Mean DHW, first decade"; "Mean DHW, last decade"], level_rows)
 
     println(io, "### Cyclones (system-wide)\n")
     events = vec(count(>(0), stochastic(dom.cyclone_intensity); dims=1))
@@ -195,9 +207,9 @@ end
 function _plots(io::IO, figures)
     println(io, "## Plots\n")
     if figures === nothing
-        println(io, "Plots were not generated for this domain (CairoMakie was not loaded, " *
-                    "or `figures=false` was passed). Run `using CairoMakie` before " *
-                    "`write_domain` / `generate_domain` (the notebook does this) to include them.\n")
+        println(io, "Plots were not generated (CairoMakie was not loaded, or `figures=false` " *
+                    "was passed). Run `using CairoMakie` before writing (the notebooks do this) " *
+                    "to include them.\n")
         return nothing
     end
     for file in figures

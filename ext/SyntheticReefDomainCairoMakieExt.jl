@@ -234,4 +234,17 @@ function SRD.save_figures(dom::SyntheticDomain, dir::AbstractString)
     return first.(figures)
 end
 
+function SRD.save_cscape_figures(dom::SyntheticDomain, options::SRD.CscapeOptions, dir::AbstractString)
+    files = SRD.save_figures(dom, dir)
+    figures = Tuple{String,Figure}[
+        ("cscape_connectivity.png", SRD.plot_cscape_connectivity(dom, options)),
+        ("cscape_cyclones.png", SRD.plot_cscape_cyclones(dom, options)),
+        ("cscape_cover.png", SRD.plot_cscape_cover(dom, options))
+    ]
+    for (file, fig) in figures
+        save(joinpath(dir, file), fig; px_per_unit=2)
+    end
+    return [files; first.(figures)]
+end
+
 end

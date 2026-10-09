@@ -15,8 +15,9 @@ There are two ways in:
 - **Notebook**: a Pluto notebook with sliders and live previews (map, connectivity, cover,
   DHW and cyclone time series) that writes the domain or saves its TOML config.
 
-A second, separate notebook exports a domain as an input project for the original R package
-[cscape](https://github.com/open-AIMS/c-scape) (see *C~scape (R) export*).
+A second notebook, `cscape_export.jl`, is the same builder but writes an input project for
+the original R package [cscape](https://github.com/open-AIMS/c-scape) instead of an ADRIA
+domain (see *C~scape (R) export*).
 
 ## Getting started
 
@@ -24,8 +25,8 @@ A second, separate notebook exports a domain as an input project for the origina
 1. Install Julia 1.11 or newer (https://julialang.org/install).
 2. Get this repository.
 3. Double-click a launcher:
-   - `start_reef_builder.bat` for the domain builder;
-   - `start_cscape_export.bat` for the C~scape export.
+   - `start_reef_builder.bat` for the domain builder, which writes ADRIA domains;
+   - `start_cscape_export.bat` for the same builder writing C~scape (R) projects.
 
 The first start installs and compiles the packages, which takes 10-15 minutes. Later starts
 take under a minute. The notebook opens in your web browser. The first time, Pluto may show
@@ -35,9 +36,9 @@ take under a minute. The notebook opens in your web browser. The first time, Plu
 [mybinder.org](https://mybinder.org). It is free and needs no account or install. Click a
 badge:
 
-- Domain builder:
+- Domain builder (ADRIA domains):
   [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/open-AIMS/SyntheticReefDomain.jl/HEAD?urlpath=pluto%2Fopen%3Fpath%3Dnotebooks%2Freef_builder.jl)
-- C~scape export:
+- Domain builder for C~scape (R) projects:
   [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/open-AIMS/SyntheticReefDomain.jl/HEAD?urlpath=pluto%2Fopen%3Fpath%3Dnotebooks%2Fcscape_export.jl)
 
 Binder limits:
@@ -295,6 +296,8 @@ julia --project=notebooks notebooks/run.jl
    - cyclone years and mortality per group.
 3. Press **Write domain** (default `domains/<name>`) and/or **Save config** (default
    `configs/<name>.toml`). Neither overwrites existing files unless *replace* is ticked.
+   Replacing a domain only replaces the files the builder writes; other content of the
+   folder (such as a `cscape/` export) is kept.
    The written domain's `README.md` records every setting and shows the same plots (see
    *Domain report*). **Prepare download (.zip)** gives the same domain as a zip, which is
    useful on Binder.
@@ -305,28 +308,51 @@ reefs. Untick the checkbox at the top to use the range controls instead.
 ## C~scape (R) export
 
 `notebooks/cscape_export.jl` (or `start_cscape_export.bat`, or
-`julia --project=notebooks notebooks/run_cscape.jl`) turns a synthetic domain into an input
-project for the R package [cscape](https://github.com/open-AIMS/c-scape). It is kept
-separate from the domain builder.
+`julia --project=notebooks notebooks/run_cscape.jl`) is the domain builder (see *Notebook*)
+with a *C~scape (R) export* section in place of its Write section. It turns the reef system
+into an input project for the R package [cscape](https://github.com/open-AIMS/c-scape) and
+writes **only** that project, no ADRIA domain.
 
-1. Choose the domain: one already in `domains/`, a config, or any `.toml` file. The domain
-   is rebuilt from its settings, so the C~scape inputs match the ADRIA domain exactly.
+1. Build the reef system at the top as in the domain builder: start from a config or from a
+   domain already in `domains/`, and adjust it.
 2. Set the C~scape options:
    - Region: a `Cluster` level of the demography models, e.g. `Offshore_Central`.
    - Demography file names.
    - Spawner connectivity scale.
    - Brooder dispersal.
 
-   The options of an earlier export of the same domain are loaded as the starting point.
+   If the domain was exported before (`cscape_projects/<name>/`, or the older
+   `domains/<name>/cscape/`), the options of that export are loaded.
 3. Check the previews: the site table, spawner and brooder connectivity, cyclone
    categories per replicate, and initial cover for the six C~scape types. Warnings flag
    reefs outside the demography models' depth or `ub_med` range.
-4. **Write C~scape project** (default `<domain>/cscape/`) or **Prepare download (.zip)**.
+4. **Write C~scape project** (default `cscape_projects/<name>/`) or **Prepare download
+   (.zip)**. The project's `README.md` says how to run it and, like a domain's report (see
+   *Domain report*), lists every setting with a per-reef table and shows the plots: the
+   domain plots plus C~scape connectivity, cyclone categories and initial cover by type
+   (saved in `figures/`).
+
+The project keeps the settings in `generator_config.toml`. To get the matching ADRIA
+domain, open that file in `reef_builder.jl` (with the file button) and write it there, or
+run `generate_domain("cscape_projects/<name>/generator_config.toml")`. The same settings
+always give the same reef system, so the C~scape inputs and the ADRIA domain match exactly.
+Opening that file in `cscape_export.jl` continues from an earlier export.
+
+**Changing the builder:** edit `reef_builder.jl` (in Pluto or a text editor). The C~scape
+launchers (`start_cscape_export.bat`, `notebooks/run_cscape.jl`) copy the changes into
+`cscape_export.jl` before opening it. When you open `cscape_export.jl` another way (Pluto
+directly, or Binder, which uses the committed file), run
+`julia --project=notebooks notebooks/sync_cscape_notebook.jl` first, and commit the result.
+- Copied: every builder cell except the title and the Write section (which writes the ADRIA
+  domain). Put new builder cells before the `## Write` heading.
+- Kept: `cscape_export.jl`'s own title and C~scape section. Edit C~scape cells in
+  `cscape_export.jl` itself; edits to builder cells there are overwritten.
+- A test fails while the two notebooks differ.
 
 From Julia:
 
 ```julia
-write_cscape_project(dom, "domains/Chain5/cscape"; options=CscapeOptions(; region="Offshore_Central"))
+write_cscape_project(dom, "cscape_projects/Chain5"; options=CscapeOptions(; region="Offshore_Central"))
 ```
 
 Julia cannot write `.rds`, so the export writes CSV inputs (`inputs/`) plus
@@ -497,6 +523,8 @@ The tests cover:
 - cover conversion;
 - disturbance statistics;
 - an ADRIA load round-trip for 1-20 reefs;
-- short ADRIA scenario runs.
+- short ADRIA scenario runs;
+- the C~scape export (with an R round trip when R and cscape are installed);
+- that `cscape_export.jl` holds the same builder cells as `reef_builder.jl`.
 
 Set `RUN_ADRIA_SCENARIOS=false` to skip the scenario runs, which take about 2-3 minutes.

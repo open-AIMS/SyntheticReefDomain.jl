@@ -92,7 +92,9 @@ The folder's `README.md` reports every setting, a per-reef table and, when Cairo
 loaded (`using CairoMakie`) and `figures=true`, the notebook's plots (saved in `figures/`).
 
 An existing non-empty folder is only replaced with `force=true`, and only if it already
-holds a data package (`datapackage.json`), so an unrelated folder is never deleted.
+holds a data package (`datapackage.json`), so an unrelated folder is never deleted. Replacing
+removes only what `write_domain` writes (`DOMAIN_CONTENT`); anything else in the folder, such
+as a C~scape export in `cscape/`, is kept.
 """
 function write_domain(
     dom::SyntheticDomain, outdir::AbstractString=joinpath("domains", dom.config.name);
@@ -114,7 +116,7 @@ function write_domain(
             "Refusing to replace $outdir: it does not contain a datapackage.json, so it " *
             "does not look like a domain written by this package."
         ))
-        _remove_domain_dir(outdir)
+        _remove_domain_content(outdir)
     end
 
     for sub in ("spatial", "connectivity", "DHWs", "waves", "cyclones")
@@ -159,17 +161,25 @@ function write_domain(
     return outdir
 end
 
+# Everything `write_domain` writes into a domain folder
+const DOMAIN_CONTENT = (
+    "datapackage.json", "generator_config.toml", "README.md",
+    "spatial", "connectivity", "DHWs", "waves", "cyclones", "figures"
+)
+
+# Removes the domain's own files and folders, keeping anything else (e.g. `cscape/`).
 # On Windows, files that are still open cannot be deleted. Loading a domain with ADRIA can
 # leave NetCDF handles open until they are garbage collected (ADRIA first tries
 # `open_dataset`, then falls back to NetCDF.jl), so collect garbage once and retry.
-function _remove_domain_dir(outdir::AbstractString)
+function _remove_domain_content(outdir::AbstractString)
+    remove() = foreach(p -> rm(p; recursive=true, force=true), joinpath.(outdir, DOMAIN_CONTENT))
     try
-        rm(outdir; recursive=true)
+        remove()
     catch err
         err isa Base.IOError || rethrow()
         GC.gc()
         try
-            rm(outdir; recursive=true)
+            remove()
         catch err2
             err2 isa Base.IOError || rethrow()
             throw(ArgumentError(

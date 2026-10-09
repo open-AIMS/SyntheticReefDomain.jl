@@ -20,6 +20,14 @@ small_cfg(; n=10, name="Test$(n)", kwargs...) = DomainConfig(;
 
 row_sums(C) = vec(sum(C; dims=2))
 
+"Code of each cell of a Pluto notebook file by cell id, and the display order of the ids."
+function notebook_cells(path)
+    parts = split(read(path, String), "\n# ╔═╡ ")
+    cells = Dict(String(id) => strip(code) for (id, code) in (split(p, '\n'; limit=2) for p in parts[2:(end - 1)]))
+    order = [m.captures[1] for m in eachmatch(r"^# (?:╟─|╠═)([0-9a-f-]{36})"m, last(parts))]
+    return cells, order
+end
+
 @testset "SyntheticReefDomain" begin
     @testset "Configuration" begin
         cfg = DomainConfig()
@@ -375,6 +383,16 @@ row_sums(C) = vec(sum(C; dims=2))
         @test occursin("### Reefs (resolved values)", readme2)
         @test !occursin("](figures/", readme2)
 
+        # Replacing a domain keeps the rest of its folder (e.g. a C~scape export with the
+        # demography files added by hand) but drops its own old files (here the figures)
+        demog = joinpath(path, "cscape", "data", "demog_inputs_brooder.rds")
+        mkpath(dirname(demog))
+        write(demog, "kept")
+        @test write_domain(synth, path; force=true, figures=false) == path
+        @test read(demog, String) == "kept"
+        @test !isdir(joinpath(path, "figures"))
+        @test isfile(joinpath(path, "datapackage.json"))
+
         # truncated_dilution lists its own settings instead of self-recruitment and strength
         td_cfg = small_cfg(; n=4, name="ReportTD",
             connectivity=ConnectivityConfig(; topology="truncated_dilution"))
@@ -448,11 +466,24 @@ row_sums(C) = vec(sum(C; dims=2))
         end
         @test countlines(joinpath(dir, "inputs", "disturbances_45.csv")) == 1 + T * n * R
         @test countlines(joinpath(dir, "inputs", "scenarios.csv")) == 3
-        @test occursin("demog_inputs_brooder.rds", read(joinpath(dir, "README.md"), String))
+        # README: how to run, then the domain report with the domain and C~scape plots
+        cs_readme = read(joinpath(dir, "README.md"), String)
+        @test occursin("demog_inputs_brooder.rds", cs_readme)
+        cs_figs = ["map.png", "connectivity.png", "cover.png", "dhw_45.png", "dhw_85.png",
+            "cyclones.png", "cscape_connectivity.png", "cscape_cyclones.png", "cscape_cover.png"]
+        @test sort(readdir(joinpath(dir, "figures"))) == sort(cs_figs)
+        @test all(occursin("](figures/$f)", cs_readme) for f in cs_figs)
+        for heading in ("## Running", "## Settings", "### Connectivity", "### Reefs (resolved values)",
+            "### C~scape export options", "## Plots", "## Files")
+            @test occursin(heading, cs_readme)
+        end
+        @test !occursin("DHWs/dhwRCP", cs_readme)  # no ADRIA file names
         @test_throws ArgumentError write_cscape_project(synth, dir; options=opts, run_r=false)
         touch(joinpath(dir, "data", "demog_inputs_acro_table.rds"))
-        write_cscape_project(synth, dir; options=opts, run_r=false, force=true)
+        write_cscape_project(synth, dir; options=opts, run_r=false, force=true, figures=false)
         @test isfile(joinpath(dir, "data", "demog_inputs_acro_table.rds"))
+        @test !isdir(joinpath(dir, "figures"))  # old figures removed on update
+        @test occursin("Plots were not generated", read(joinpath(dir, "README.md"), String))
         other = mkpath(joinpath(TMP, "NotAnExport"))
         touch(joinpath(other, "keep.txt"))
         @test_throws ArgumentError write_cscape_project(synth, other; run_r=false, force=true)
@@ -465,6 +496,7 @@ row_sums(C) = vec(sum(C; dims=2))
         zc = Z.ZipReader(cscape_zip(synth, opts; run_r=false))
         @test "Cs3_cscape/build_cscape_project.R" in Z.zip_names(zc)
         @test "Cs3_cscape/inputs/disturbances_85.csv" in Z.zip_names(zc)
+        @test "Cs3_cscape/figures/cscape_cover.png" in Z.zip_names(zc)
 
         # With R and cscape installed: build with R, then let C~scape read it (dry run) and
         # simulate one replicate using the dummy demography of CScape.jl's 00_Verify project
@@ -499,6 +531,27 @@ row_sums(C) = vec(sum(C; dims=2))
         else
             @info "Skipping the C~scape R round trip (needs Rscript, the cscape package and CScape.jl's 00_Verify demography)."
         end
+    end
+
+    @testset "Notebooks" begin
+        # cscape_export.jl is the builder of reef_builder.jl (without its title and its Write
+        # section, which writes the ADRIA domain) plus the C~scape export, kept in step by
+        # notebooks/sync_cscape_notebook.jl
+        nb_dir = joinpath(@__DIR__, "..", "notebooks")
+        b_cells, b_order = notebook_cells(joinpath(nb_dir, "reef_builder.jl"))
+        c_cells, c_order = notebook_cells(joinpath(nb_dir, "cscape_export.jl"))
+        @test length(b_order) == length(b_cells) && length(c_order) == length(c_cells)
+        heading(code, h) = occursin(Regex("^md\"\"\"\\s*" * h), code)
+        stop = something(findfirst(id -> heading(b_cells[id], "##\\s+Write\\b"), b_order), length(b_order) + 1)
+        b_ids = [id for id in b_order[1:(stop - 1)] if !heading(b_cells[id], "#\\s")]
+        @test stop <= length(b_order)  # the builder has a Write section
+        @test !any(occursin("write_domain(", code) for code in values(c_cells))
+        in_sync = [id for id in c_order if haskey(b_cells, id)] == b_ids &&
+                  all(c_cells[id] == b_cells[id] for id in b_ids)
+        in_sync || @warn "cscape_export.jl is out of date: run `julia --project=notebooks notebooks/sync_cscape_notebook.jl`."
+        @test in_sync
+        own = [id for id in c_order[2:end] if !(id in b_ids)]  # after its own title
+        @test occursin("## C~scape (R) export", c_cells[first(own)])
     end
 
     @testset "ADRIA round trip" begin
