@@ -51,6 +51,10 @@ cells = [[combined.cells_dict[id] for id in head]; [builder.cells_dict[id] for i
 synced = Pluto.Notebook(cells, COMBINED)
 synced.metadata = combined.metadata
 synced.nbpkg_ctx = nothing  # the notebook activates its own environment
+# Store cells in the order Pluto itself saves them (package cells first), so opening the
+# notebook in Pluto does not reorder the file again
+synced.topology = Pluto.updated_topology(synced.topology, synced, synced.cells)
+synced._cached_topological_order = Pluto.topological_order(synced.topology)
 
 new = sprint(io -> Pluto.save_notebook(io, synced))
 if new == read(COMBINED, String)

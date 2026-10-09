@@ -16,6 +16,21 @@ macro bind(def, element)
     #! format: on
 end
 
+# ╔═╡ 30391b60-c2c9-11f1-357b-e56922d03858
+begin
+	import Pkg
+	Pkg.activate(@__DIR__)
+	Pkg.instantiate()
+	using SyntheticReefDomain, CairoMakie, Statistics
+	# Explicit imports: Makie also exports a `Slider`
+	using PlutoUI: PlutoUI, Slider, Select, CheckBox, TextField, NumberField, CounterButton,
+		FilePicker, DownloadButton
+	import SyntheticReefDomain as SRD
+	CairoMakie.activate!(; type="png", px_per_unit=2)
+	const REPO = normpath(joinpath(@__DIR__, ".."))
+	const CONFIG_DIR = joinpath(REPO, "configs")
+end
+
 # ╔═╡ 10c11cf0-c374-11f1-0e31-5d1374fde411
 md"""
 # Synthetic reef builder + C~scape (R) export
@@ -34,21 +49,6 @@ settings in `generator_config.toml`: open that file in `reef_builder.jl` (the sa
 writing ADRIA domains), or run `generate_domain` on it, to get the matching ADRIA domain.
 Every change rebuilds the reef system in memory; nothing is written until you press a button.
 """
-
-# ╔═╡ 30391b60-c2c9-11f1-357b-e56922d03858
-begin
-	import Pkg
-	Pkg.activate(@__DIR__)
-	Pkg.instantiate()
-	using SyntheticReefDomain, CairoMakie, Statistics
-	# Explicit imports: Makie also exports a `Slider`
-	using PlutoUI: PlutoUI, Slider, Select, CheckBox, TextField, NumberField, CounterButton,
-		FilePicker, DownloadButton
-	import SyntheticReefDomain as SRD
-	CairoMakie.activate!(; type="png", px_per_unit=2)
-	const REPO = normpath(joinpath(@__DIR__, ".."))
-	const CONFIG_DIR = joinpath(REPO, "configs")
-end
 
 # ╔═╡ 30391b60-c2c9-11f1-26e7-314bdf737a3f
 config_files = let
